@@ -1,6 +1,7 @@
 ﻿// LightEditor2.Maui/MauiProgram.cs
 using Microsoft.Extensions.Logging;
 using CommunityToolkit.Maui; // Für Toolkit (FolderPicker etc.)
+using CommunityToolkit.Maui.Storage;
 
 // Namespaces aus Ihren Projekten
 using LightEditor2.Core.Data;
@@ -9,6 +10,7 @@ using LightEditor2.RazorLib.Components;
 using LightEditor2.Core.Abstractions;
 using Microsoft.EntityFrameworkCore;
 using LightEditor2.Maui.Services;
+
 
 namespace LightEditor2.Maui
 {
@@ -47,6 +49,9 @@ namespace LightEditor2.Maui
             builder.Services.AddSingleton<CurrentStateService>();
             builder.Services.AddSingleton<NotificationService>();
             builder.Services.AddSingleton<AppInfoService>();
+            // Stellen Sie die Standardimplementierungen des Toolkits für die Injektion bereit
+            builder.Services.AddSingleton<IFileSaver>(FileSaver.Default);
+            builder.Services.AddSingleton<IFolderPicker>(FolderPicker.Default);
 
             // Transient Services (neue Instanz bei jeder Anforderung)
             builder.Services.AddTransient<ISettingService, SettingService>();
@@ -58,6 +63,7 @@ namespace LightEditor2.Maui
             builder.Services.AddTransient<IFolderPickerService, MauiFolderPickerService>();
             builder.Services.AddTransient<IFileSaverService, MauiFileSaverService>();
             builder.Services.AddTransient<IDialogService, MauiDialogService>();
+
 
             // 4. MAUI Blazor WebView Service hinzufügen
             builder.Services.AddMauiBlazorWebView();
