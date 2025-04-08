@@ -2,6 +2,7 @@
 @inject LightEditor2.Core.Services.IProjectService ProjectService
 @inject LightEditor2.Core.Services.ISubGroupService SubGroupService
 @inject LightEditor2.Core.Services.CurrentStateService CurrentStateService
+@inject LightEditor2.Core.Abstractions.IDialogService DialogService
 @inject NavigationManager Navigation
 @inject ILogger<NavMenu> Logger
 @inject LightEditor2.Core.Services.NotificationService NotificationService
@@ -143,13 +144,13 @@
 
     private async Task AddProject()
     {
-        string? projectName = await Application.Current.MainPage.DisplayPromptAsync(
-            "Neues Projekt",
-            "Projektnamen:",
-            accept: "OK",
-            cancel: "Abbrechen",
-            placeholder: "Bitte geben Sie den Projektnamen ein:",
-            keyboard: Keyboard.Text
+        string? projectName = await DialogService.ShowPromptAsync(
+             title: "Neues Projekt",
+             message: "Projektnamen:",
+             accept: "OK",
+             cancel: "Abbrechen",
+             placeholder: "Bitte geben Sie den Projektnamen ein:",
+             keyboardType: "Text"
         );
 
         if (!string.IsNullOrWhiteSpace(projectName))
@@ -173,18 +174,18 @@
             {
                 Logger.LogError("Fehler beim Hinzufügen des Projekts '{ProjectName}'.", projectName);
                 // Fehlermeldung für den Benutzer anzeigen
-                await Application.Current.MainPage.DisplayAlert("Fehler", "Das Projekt konnte nicht hinzugefügt werden.", "OK");
+                await DialogService.ShowAlertAsync("Fehler", "Das Projekt konnte nicht hinzugefügt werden.", "OK");
             }
         }
     }
 
     private async Task AddSubGroup(int projectId)
     {
-        string? subgroupName = await Application.Current.MainPage.DisplayPromptAsync(
-        "Neue Untergruppe",
-        "Bitte geben Sie den Namen der Untergruppe ein:",
-        "OK",
-        "Abbrechen");
+        string? subgroupName = await DialogService.ShowPromptAsync(
+        title: "Neue Untergruppe",
+        message: "Bitte geben Sie den Namen der Untergruppe ein:",
+        accept: "OK",
+        cancel: "Abbrechen");
 
         if (!string.IsNullOrWhiteSpace(subgroupName))
         {
@@ -208,7 +209,7 @@
             else
             {
                 Logger.LogError("Fehler beim Hinzufügen der SubGroup '{SubgroupName}' zu Projekt ID {ProjectId}.", subgroupName, projectId);
-                await Application.Current.MainPage.DisplayAlert("Fehler", "Die Untergruppe konnte nicht hinzugefügt werden.", "OK");
+                await DialogService.ShowAlertAsync("Fehler", "Die Untergruppe konnte nicht hinzugefügt werden.", "OK");
             }
         }
     }
@@ -218,30 +219,33 @@
         var projects = await ProjectService.GetProjectsAsync(); // Lädt jetzt mit Logging/Fehlerbehandlung im Service
         if (projects == null || !projects.Any())
         {
-            await Application.Current.MainPage.DisplayAlert("Info", "Keine Projekte zum Löschen vorhanden.", "OK");
+            await DialogService.ShowAlertAsync("Info", "Keine Projekte zum Löschen vorhanden.", "OK");
             return;
         }
 
         var options = projects.Select(p => p.Name).ToArray();
-        var action = await Application.Current.MainPage.DisplayActionSheet(
-            "Lösche Projekt...",
-            "Abbrechen",
-            null, // 'null' für den "destructive" Button (wird oft rot dargestellt)
-            options);
+        var action = await DialogService.ShowActionSheetAsync(
+            "Lösche Projekt...",  // title
+            "Abbrechen",          // cancel
+            null,                 // destruction (kein destruktiver Button hier nötig)
+            options
+        );
 
-        if (action == "Abbrechen" || string.IsNullOrEmpty(action)) // Sicherstellen, dass eine Auswahl getroffen wurde
+        if (string.IsNullOrEmpty(action)) // Sicherstellen, dass eine Auswahl getroffen wurde
         {
+            Logger.LogInformation("Projektlöschung abgebrochen.");
             return;
         }
 
         var projectToDelete = projects.FirstOrDefault(p => p.Name == action);
         if (projectToDelete != null)
         {
-            bool confirm = await Application.Current.MainPage.DisplayAlert(
+            bool confirm = await DialogService.ShowConfirmationAsync(
                 "Projekt löschen",
-                $"Möchten Sie das Projekt '{projectToDelete.Name}' wirklich löschen? Alle zugehörigen Untergruppen und Slides werden ebenfalls gelöscht (wegen Cascade Delete).", // Hinweis hinzugefügt
-                "Ja",
-                "Nein");
+                $"Möchten Sie das Projekt '{projectToDelete.Name}' wirklich löschen? Alle zugehörigen Untergruppen und Slides werden ebenfalls gelöscht (wegen Cascade Delete).",
+                "Ja",  
+                "Nein" 
+            );
 
             if (confirm)
             {
@@ -253,14 +257,14 @@
                     Logger.LogInformation("Projekt '{ProjectName}' (ID: {ProjectId}) gelöscht.", projectToDelete.Name, projectToDelete.Id);
                     CurrentStateService.NotifyStateChanged(); // Benachrichtigt andere Teile (z.B. Header)
                     await LoadProjects(); // Liste neu laden
-                    //await Application.Current.MainPage.DisplayAlert("Erfolg", $"Das Projekt '{projectToDelete.Name}' wurde gelöscht.", "OK"); // Erfolgsmeldung
+                    //await DialogService.ShowAlertAsync("Erfolg", $"Das Projekt '{projectToDelete.Name}' wurde gelöscht.", "OK"); // Erfolgsmeldung
                     NotificationService.ShowMessage($"Status: Projekt '{projectToDelete.Name}' wurde gelöscht.");
                 }
                 else
                 {
                     Logger.LogError("Fehler beim Löschen des Projekts '{ProjectName}' (ID: {ProjectId}).", projectToDelete.Name, projectToDelete.Id);
                     // Fehlermeldung für den Benutzer anzeigen
-                    await Application.Current.MainPage.DisplayAlert("Fehler", $"Das Projekt '{projectToDelete.Name}' konnte nicht gelöscht werden.", "OK");
+                    await DialogService.ShowAlertAsync("Fehler", $"Das Projekt '{projectToDelete.Name}' konnte nicht gelöscht werden.", "OK");
                 }
             }
         }
@@ -268,7 +272,7 @@
         {
             Logger.LogWarning("Ausgewähltes Projekt '{Action}' zum Löschen nicht in der Liste gefunden.", action);
             // Optional: Fehlermeldung
-            await Application.Current.MainPage.DisplayAlert("Fehler", "Das ausgewählte Projekt wurde nicht gefunden.", "OK");
+            await DialogService.ShowAlertAsync("Fehler", "Das ausgewählte Projekt wurde nicht gefunden.", "OK");
         }
     }
 
@@ -279,7 +283,7 @@
         var projects = await ProjectService.GetProjectsAsync();
         if (projects == null || !projects.Any())
         {
-            await Application.Current.MainPage.DisplayAlert("Export", "Keine Projekte vorhanden.", "OK");
+            await DialogService.ShowAlertAsync("Export", "Keine Projekte vorhanden.", "OK");
             return;
         }
 
@@ -287,14 +291,15 @@
         var options = projects.Select(p => p.Name).ToArray();
 
         // Zeigen Sie das ActionSheet an; "Abbrechen" ist die Abbruchoption
-        var selected = await Application.Current.MainPage.DisplayActionSheet(
+        var selected = await DialogService.ShowActionSheetAsync(
             "Zu Exportierendes Projekt...",
             "Abbrechen",
             null,
             options);
 
-        if (string.IsNullOrEmpty(selected) || selected == "Abbrechen")
+        if (string.IsNullOrEmpty(selected))
         {
+            Logger.LogInformation("Exportierung abgebrochen.");
             return;
         }
 
@@ -358,7 +363,7 @@
         await File.WriteAllTextAsync(filePath, json);
 
         // Rückmeldung anzeigen
-        //await Application.Current.MainPage.DisplayAlert("Export", $"Projekt '{project.Name}' wurde exportiert nach:\n{filePath}", "OK");
+        //await DialogService.ShowAlertAsync("Export", $"Projekt '{project.Name}' wurde exportiert nach:\n{filePath}", "OK");
         NotificationService.ShowMessage($"Status: Projekt '{project.Name}' wurde exportiert nach:\n{filePath}");
     }
 

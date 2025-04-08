@@ -9,7 +9,7 @@ namespace LightEditor2.Core.Services
         /// Ruft alle Daten (Projekte, Untergruppen, Slides) für den Export ab.
         /// </summary>
         /// <returns>Eine Liste aller Projekte mit ihren Abhängigkeiten oder null bei Fehlern.</returns>
-        Task<List<Project>?> GetAllDataForExportAsync();
+        Task<FullExportData?> GetAllDataForExportAsync();
 
         /// <summary>
         /// Importiert Daten aus einem JSON-String, ersetzt dabei alle vorhandenen Daten.
@@ -17,5 +17,7 @@ namespace LightEditor2.Core.Services
         /// <param name="jsonData">Der JSON-String, der die Projektdaten enthält.</param>
         /// <returns>True bei Erfolg, False bei Fehlern.</returns>
         Task<bool> ImportAllDataAsync(string jsonData);
+
+        
     }
 }

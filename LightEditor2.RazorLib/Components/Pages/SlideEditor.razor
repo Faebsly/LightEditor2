@@ -5,6 +5,7 @@
 @inject LightEditor2.Core.Services.ISubGroupService SubGroupService
 @inject LightEditor2.Core.Services.IProjectService ProjectService
 @inject LightEditor2.Core.Services.CurrentStateService CurrentStateService
+@inject LightEditor2.Core.Abstractions.IDialogService DialogService
 @inject NavigationManager Navigation
 @inject ILogger<SlideEditor> Logger
 @inject LightEditor2.Core.Services.NotificationService NotificationService
@@ -107,7 +108,7 @@
                 CurrentStateService.CurrentSubgroupId = subgroup.Id;
                 // Optional: Navigation oder Fehlermeldung
                 // Navigation.NavigateTo("/"); // Beispiel: Zurück zur Startseite
-                await Application.Current.MainPage.DisplayAlert("Fehler", "Das zugehörige Projekt konnte nicht geladen werden.", "OK");
+                await DialogService.ShowAlertAsync("Fehler", "Das zugehörige Projekt konnte nicht geladen werden.", "OK");
 
             }
         }
@@ -120,7 +121,7 @@
             CurrentStateService.CurrentProjectName = "";
             CurrentStateService.CurrentSubgroupName = "Gruppe nicht gefunden";
             CurrentStateService.CurrentSubgroupId = 0;
-            await Application.Current.MainPage.DisplayAlert("Fehler", "Die ausgewählte Gruppe konnte nicht geladen werden.", "OK");
+            await DialogService.ShowAlertAsync("Fehler", "Die ausgewählte Gruppe konnte nicht geladen werden.", "OK");
             // Optional: Zurück navigieren
             // Navigation.NavigateTo("/");
         }
@@ -172,7 +173,7 @@
         if (allSucceeded)
         {
             Logger.LogInformation("Alle {SuccessCount} Slides erfolgreich gespeichert.", successCount);
-            //await Application.Current.MainPage.DisplayAlert("Erfolg", "Alle Slides wurden gespeichert.", "OK");
+            //await DialogService.ShowAlertAsync("Erfolg", "Alle Slides wurden gespeichert.", "OK");
             NotificationService.ShowMessage("Status: Alle Slides wurden gespeichert.");
 
         }
@@ -180,7 +181,7 @@
         {
             int failureCount = slides.Count - successCount;
             Logger.LogWarning("{SuccessCount} von {TotalCount} Slides gespeichert, {FailureCount} fehlgeschlagen.", successCount, slides.Count, failureCount);
-            await Application.Current.MainPage.DisplayAlert("Teilweise Fehler", $"{successCount} von {slides.Count} Slides gespeichert. Bei {failureCount} Slides gab es Probleme. Prüfen Sie die Logs für Details.", "OK");
+            await DialogService.ShowAlertAsync("Teilweise Fehler", $"{successCount} von {slides.Count} Slides gespeichert. Bei {failureCount} Slides gab es Probleme. Prüfen Sie die Logs für Details.", "OK");
         }
 
         // Optional: Liste neu laden, um sicherzustellen, dass der Zustand aktuell ist
@@ -222,7 +223,7 @@
         else
         {
             Logger.LogError("Fehler beim Hinzufügen des neuen Slides für SubgroupId: {SubgroupId}.", subgroupId);
-            await Application.Current.MainPage.DisplayAlert("Fehler", "Der neue Slide konnte nicht hinzugefügt werden.", "OK");
+            await DialogService.ShowAlertAsync("Fehler", "Der neue Slide konnte nicht hinzugefügt werden.", "OK");
         }
     }
 
@@ -231,10 +232,12 @@
         if (slide == null) return;
 
         // Bestätigung für das LÖSCHEN DES SLIDES
-        bool confirmDelete = await Application.Current.MainPage.DisplayAlert(
-            "Slide löschen", // Korrekter Titel
-            $"Möchten Sie das Slide '{slide.Title}' wirklich löschen?", // Korrekte Nachricht
-            "Ja", "Nein");
+        bool confirmDelete = await DialogService.ShowConfirmationAsync( // <-- Richtige Methode aufrufen!
+            "Slide löschen", // title
+            $"Möchten Sie das Slide '{slide.Title}' wirklich löschen?", // message
+            "Ja",   // accept
+            "Nein"  // cancel
+        );
 
         if (!confirmDelete)
         {
@@ -257,7 +260,7 @@
         else
         {
             Logger.LogError("Fehler beim Löschen des Slides (ID: {SlideId}).", slide.Id);
-            await Application.Current.MainPage.DisplayAlert("Fehler", "Das Slide konnte nicht gelöscht werden.", "OK");
+            await DialogService.ShowAlertAsync("Fehler", "Das Slide konnte nicht gelöscht werden.", "OK");
         }
     }
 
@@ -267,7 +270,7 @@
         if (subgroup == null)
         {
             Logger.LogWarning("Versuch, eine nicht geladene SubGroup zu löschen.");
-            await Application.Current.MainPage.DisplayAlert("Fehler", "Keine Gruppe zum Löschen ausgewählt oder geladen.", "OK");
+            await DialogService.ShowAlertAsync("Fehler", "Keine Gruppe zum Löschen ausgewählt oder geladen.", "OK");
             return;
         }
 
@@ -275,11 +278,12 @@
         string groupName = subgroup.Name ?? "diese Gruppe"; // Sicherer Zugriff
 
         // Bestätigungsabfrage für die GRUPPE
-        bool confirm = await Application.Current.MainPage.DisplayAlert(
+        bool confirm = await DialogService.ShowConfirmationAsync(
             "Gruppe löschen", // Korrekter Titel
             $"Möchten Sie {groupName} (ID: {subgroup.Id}) wirklich löschen? Alle zugehörigen Slides werden ebenfalls entfernt.", // Korrekte Nachricht
             "Ja",
-            "Nein");
+            "Nein"
+        );
 
         if (confirm) // subgroup ist hier definitiv nicht null
         {
@@ -296,14 +300,14 @@
                 CurrentStateService.CurrentSubgroupName = "";
                 CurrentStateService.CurrentSubgroupId = 0;
                 CurrentStateService.NotifyStateChanged(); // Sidebar/Header aktualisieren lassen
-                //await Application.Current.MainPage.DisplayAlert("Erfolg", $"{groupName} wurde gelöscht.", "OK"); // Korrekte Erfolgsmeldung
+                //await DialogService.ShowAlertAsync("Erfolg", $"{groupName} wurde gelöscht.", "OK"); // Korrekte Erfolgsmeldung
                 NotificationService.ShowMessage($"Status: {groupName} wurde gelöscht.");
                 Navigation.NavigateTo("/"); // Zurück zur Hauptseite
             }
             else
             {
                 Logger.LogError("Fehler beim Löschen der SubGroup (ID: {SubgroupId}).", subgroup.Id);
-                await Application.Current.MainPage.DisplayAlert("Fehler", $"{groupName} konnte nicht gelöscht werden.", "OK"); // Korrekte Fehlermeldung
+                await DialogService.ShowAlertAsync("Fehler", $"{groupName} konnte nicht gelöscht werden.", "OK"); // Korrekte Fehlermeldung
             }
         }
     }

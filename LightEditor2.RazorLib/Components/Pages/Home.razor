@@ -1,38 +1,61 @@
-﻿@page "/"
+﻿@* LightEditor2.RazorLib/Components/Pages/Home.razor *@
+@page "/"
+
+@* ----- Injects für Core Services und Abstraktionen ----- *@
 @inject LightEditor2.Core.Services.AppInfoService AppInfoService
 @inject LightEditor2.Core.Services.IDataManagementService DataManagementService
 @inject LightEditor2.Core.Services.NotificationService NotificationService
-@inject ILogger<Home> Logger 
-@inject NavigationManager Navigation 
+@inject LightEditor2.Core.Services.ISettingService SettingService
+@inject LightEditor2.Core.Abstractions.IFolderPickerService FolderPickerService
+@inject LightEditor2.Core.Abstractions.IFilePickerService FilePickerService
+@inject LightEditor2.Core.Abstractions.IFileSaverService FileSaverService
+@inject LightEditor2.Core.Abstractions.IDialogService DialogService
 @inject LightEditor2.Core.Services.CurrentStateService CurrentStateService
-@using CommunityToolkit.Maui.Storage
-@using Microsoft.Extensions.Logging
-@using System.Text.Json 
-@using LightEditor2.Core.Models
-@using System.Text.Json.Serialization
-@using Microsoft.Maui.Storage
+@inject Microsoft.Extensions.Logging.ILogger<Home> Logger
+@inject NavigationManager Navigation
 
+@* ----- Using-Anweisungen (Nur Core und Standard .NET/Blazor) ----- *@
+@using System.Text.Json
+@using LightEditor2.Core.Models
+@using LightEditor2.Core.Data
+@using LightEditor2.Core.Abstractions
+@using LightEditor2.Core.Services
+@using Microsoft.Extensions.Logging
 
 <h1>Willkommen zu meinem LightEditor</h1>
 
 <p>
-    Version: @AppInfoService.DisplayVersion 
+    Version: @AppInfoService.DisplayVersion
 </p>
 
+<hr /> @* Trennlinie *@
+
+<h2>Einstellungen</h2>
+<div class="mb-3">
+    <label for="exportPathDisplay" class="form-label">Standard-Exportpfad für Projekte:</label>
+    <div class="input-group">
+        <input type="text" id="exportPathDisplay" class="form-control" value="@_exportPath" readonly placeholder="Noch kein Pfad festgelegt...">
+        <button class="btn btn-outline-secondary" type="button" @onclick="SelectExportPathAsync" disabled="@_isBusy">
+            @if (_isBusy) { <span class="spinner-border spinner-border-sm"></span> }
+            else { <i class="bi bi-folder2-open"></i> }
+            Pfad auswählen...
+        </button>
+    </div>
+    @if (string.IsNullOrEmpty(_exportPath))
+    {
+        <small class="text-muted">Der Pfad wird beim ersten Einzelexport abgefragt, falls hier nicht gesetzt.</small>
+    }
+</div>
+
+<hr />
 <h2>Datenverwaltung</h2>
 <div class="mt-3 mb-3">
     <button class="btn btn-info me-2" @onclick="HandleExportAllData" disabled="@_isBusy">
-        @if (_isBusy)
-        {
-            <span class="spinner-border spinner-border-sm me-1"></span>
-        }
+        @if (_isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
         Alle Daten exportieren...
     </button>
     <button class="btn btn-warning" @onclick="HandleImportData" disabled="@_isBusy">
-        @if (_isBusy)
-        {
-            <span class="spinner-border spinner-border-sm me-1"></span>
-        }
+        @if (_isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
         Daten importieren...
     </button>
 </div>
@@ -41,77 +64,155 @@
 </p>
 
 @code {
-    
-    private bool _isBusy = false; // Für Ladeanzeige in Buttons
+    private bool _isBusy = false;
+    private string? _exportPath;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadExportPathAsync();
+    }
+
+    private async Task LoadExportPathAsync()
+    {
+        try
+        {
+             _exportPath = await SettingService.GetSettingAsync(SettingKeys.ExportPath);
+             StateHasChanged(); // UI aktualisieren, auch wenn Pfad null ist
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Fehler beim Laden des Exportpfads.");
+            // Hier keinen Dialog anzeigen, da es beim Initialisieren stören könnte
+            _exportPath = "Fehler beim Laden";
+            StateHasChanged();
+        }
+    }
+
+    private async Task SelectExportPathAsync()
+    {
+        _isBusy = true; StateHasChanged();
+        Logger.LogInformation("Auswahl des Exportpfads gestartet.");
+        try
+        {
+            FolderPickerResult result = await FolderPickerService.PickFolderAsync(default); // CancellationToken.None
+
+            if (result.IsSuccessful && result.Path != null)
+            {
+                string selectedPath = result.Path;
+                Logger.LogInformation("Exportpfad ausgewählt: {Path}", selectedPath);
+
+                bool saveSuccess = await SettingService.SetSettingAsync(SettingKeys.ExportPath, selectedPath);
+                if (saveSuccess)
+                {
+                    _exportPath = selectedPath;
+                    NotificationService.ShowMessage($"Status: Exportpfad erfolgreich auf '{selectedPath}' gesetzt.");
+                }
+                else
+                {
+                    // Fehlermeldung vom Service (Logging erfolgt dort)
+                    NotificationService.ShowMessage("Fehler: Exportpfad konnte nicht gespeichert werden.");
+                }
+            }
+            else if(result.Exception != null) // Fehler bei der Auswahl
+            {
+                 NotificationService.ShowMessage($"Fehler: Ordnerauswahl fehlgeschlagen. ({result.Exception.Message})");
+                 Logger.LogWarning(result.Exception, "Ordnerauswahl fehlgeschlagen.");
+            }
+            else // Benutzer hat abgebrochen
+            {
+                 NotificationService.ShowMessage($"Ordnerauswahl abgebrochen.");
+                 Logger.LogInformation("Ordnerauswahl abgebrochen.");
+            }
+        }
+        catch (Exception ex) // Unerwarteter Fehler
+        {
+            Logger.LogError(ex, "Unerwarteter Fehler bei der Auswahl des Exportpfads.");
+            await DialogService.ShowAlertAsync("Fehler", "Ein Fehler ist bei der Ordnerauswahl aufgetreten.", "OK");
+        }
+        finally
+        {
+            _isBusy = false;
+            StateHasChanged();
+        }
+    }
 
     private async Task HandleExportAllData()
     {
-        _isBusy = true;
-        Logger.LogInformation("Exportvorgang gestartet.");
+        _isBusy = true; StateHasChanged();
+        Logger.LogInformation("Gesamt-Exportvorgang gestartet.");
+        string jsonString = string.Empty; // Initialisieren
+
         try
         {
-            var projects = await DataManagementService.GetAllDataForExportAsync();
+            FullExportData? exportData = await DataManagementService.GetAllDataForExportAsync();
 
-            if (projects == null)
+            if (exportData == null)
             {
-                await Application.Current.MainPage.DisplayAlert("Fehler", "Daten für Export konnten nicht geladen werden.", "OK");
+                await DialogService.ShowAlertAsync("Fehler", "Daten für Export konnten nicht geladen werden.", "OK");
+                _isBusy = false; StateHasChanged();
                 return;
             }
-
-            if (!projects.Any())
+            if (!exportData.Projects.Any() && !exportData.Settings.Any())
             {
                 NotificationService.ShowMessage("Status: Keine Daten zum Exportieren vorhanden.");
+                _isBusy = false; StateHasChanged();
                 return;
             }
 
-
             var options = new JsonSerializerOptions
-                {
-                    WriteIndented = true, // Macht die Datei lesbarer
-                    ReferenceHandler = ReferenceHandler.Preserve // Sicherstellen, dass Beziehungen korrekt behandelt werden
-                };
-            string jsonString = JsonSerializer.Serialize(projects, options);
+            {
+                WriteIndented = true,
+                ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.Preserve
+            };
+            jsonString = JsonSerializer.Serialize(exportData, options);
 
-            // Dateinamen mit Zeitstempel vorschlagen
-            string suggestedName = $"EditorDataExport_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+        }
+        catch (Exception ex) // Fehler beim Laden oder Serialisieren
+        {
+             Logger.LogError(ex, "Fehler beim Laden oder Serialisieren der Exportdaten.");
+             await DialogService.ShowAlertAsync("Fehler", "Fehler beim Vorbereiten der Exportdaten.", "OK");
+             _isBusy = false; StateHasChanged();
+             return; // Nicht versuchen zu speichern
+        }
 
-            // FileSaver verwenden (jetzt verfügbar durch das Toolkit)
+        // Separater Try-Block für das Speichern
+        try
+        {
+            string suggestedName = $"EditorFullDataExport_{DateTime.Now:yyyyMMdd_HHmmss}.json";
             using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(jsonString));
 
-            // FileSaver zum Speichern anbieten
-            var fileSaverResult = await FileSaver.Default.SaveAsync(suggestedName, stream, default); // CancellationToken.None
-            
+            FileSaverResult fileSaverResult = await FileSaverService.SaveAsync(suggestedName, stream, default);
 
             if (fileSaverResult.IsSuccessful)
             {
-                NotificationService.ShowMessage($"Status: Daten erfolgreich exportiert nach '{fileSaverResult.FilePath ?? suggestedName}'.");
-                Logger.LogInformation("Daten erfolgreich exportiert nach: {FilePath}", fileSaverResult.FilePath);
+                NotificationService.ShowMessage($"Status: Alle Daten erfolgreich exportiert nach '{fileSaverResult.FilePath ?? suggestedName}'.");
+                Logger.LogInformation("Alle Daten erfolgreich exportiert nach: {FilePath}", fileSaverResult.FilePath);
             }
             else
             {
                 NotificationService.ShowMessage($"Fehler: Export fehlgeschlagen oder abgebrochen. Grund: {fileSaverResult.Exception?.Message ?? "Unbekannt"}");
-                Logger.LogWarning("Dateiexport fehlgeschlagen oder abgebrochen. Fehler: {Exception}", fileSaverResult.Exception);
+                Logger.LogWarning(fileSaverResult.Exception, "Dateiexport fehlgeschlagen oder abgebrochen.");
             }
         }
-        catch (Exception ex)
+        catch (Exception ex) // Fehler beim Speichern
         {
-            Logger.LogError(ex, "Unerwarteter Fehler beim Exportvorgang.");
-            await Application.Current.MainPage.DisplayAlert("Fehler", "Ein unerwarteter Fehler ist beim Exportieren aufgetreten.", "OK");
+             Logger.LogError(ex, "Unerwarteter Fehler beim Speichern der Exportdatei.");
+             await DialogService.ShowAlertAsync("Fehler", "Ein unerwarteter Fehler ist beim Speichern der Datei aufgetreten.", "OK");
         }
         finally
         {
-            _isBusy = false; // Ladeanzeige beenden
+            _isBusy = false;
+            StateHasChanged();
         }
     }
 
     private async Task HandleImportData()
     {
-        // --- SEHR WICHTIGE WARNUNG ---
-        bool confirm = await Application.Current.MainPage.DisplayAlert(
+        bool confirm = await DialogService.ShowConfirmationAsync(
             "Daten importieren - WARNUNG!",
-            "Dieser Vorgang löscht ALLE aktuell in der Anwendung gespeicherten Projekte, Untergruppen und Slides unwiderruflich.\n\nMöchten Sie fortfahren und eine Importdatei auswählen?",
-            "Ja, Import starten", // Bestätigung
-            "Nein, Abbrechen"      // Abbruch
+            "Dieser Vorgang löscht ALLE aktuell in der Anwendung gespeicherten Projekte, Untergruppen, Slides und Einstellungen unwiderruflich.\n\nMöchten Sie fortfahren und eine Importdatei auswählen?",
+            "Ja, Import starten",
+            "Nein, Abbrechen"
         );
 
         if (!confirm)
@@ -120,79 +221,75 @@
             return;
         }
 
-        _isBusy = true; // Ladeanzeige starten
+        _isBusy = true; StateHasChanged();
         Logger.LogInformation("Importvorgang gestartet.");
 
         try
         {
-            var options = new PickOptions
-                {
-                    PickerTitle = "JSON-Importdatei auswählen",
-                // Definiert erlaubte Dateitypen (passen Sie dies bei Bedarf an)
-                    FileTypes = new FilePickerFileType(
-                        new Dictionary<DevicePlatform, IEnumerable<string>>
-                        {
-                        { DevicePlatform.WinUI, new[] { ".json" } }, // Windows
-                        { DevicePlatform.macOS, new[] { "json" } }, // macOS (UTType)
-                        { DevicePlatform.iOS, new[] { "public.json" } }, // iOS (UTI)
-                        { DevicePlatform.Android, new[] { "application/json" } }, // Android (MIME type)
-                        }),
-                };
-
-            // FilePicker verwenden (Benötigt using Microsoft.Maui.Storage;)
-            var result = await FilePicker.PickAsync(options);
-            if (result != null)
+            var pickerOptions = new FilePickerOptions // Aus Core.Abstractions
             {
-                if (result.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                PickerTitle = "JSON-Importdatei auswählen",
+                AllowedExtensions = new[] { ".json" }
+            };
+
+            FilePickerResult result = await FilePickerService.PickFileAsync(pickerOptions); // Aus Core.Abstractions
+
+            if (result.IsSuccessful && result.FullPath != null)
+            {
+                Logger.LogInformation("Importdatei ausgewählt: {FilePath}", result.FullPath);
+                string jsonContent = await File.ReadAllTextAsync(result.FullPath);
+
+                if (string.IsNullOrWhiteSpace(jsonContent))
                 {
-                    Logger.LogInformation("Importdatei ausgewählt: {FilePath}", result.FullPath);
-                    string jsonContent = await File.ReadAllTextAsync(result.FullPath);
+                    await DialogService.ShowAlertAsync("Fehler", "Die ausgewählte Datei ist leer.", "OK");
+                    _isBusy = false; StateHasChanged();
+                    return;
+                }
 
-                    if (string.IsNullOrWhiteSpace(jsonContent))
-                    {
-                        await Application.Current.MainPage.DisplayAlert("Fehler", "Die ausgewählte Datei ist leer.", "OK");
-                        return;
-                    }
+                // --- Import-Logik ---
+                bool importSuccess = await DataManagementService.ImportAllDataAsync(jsonContent);
 
-                    bool importSuccess = await DataManagementService.ImportAllDataAsync(jsonContent);
-
-                    if (importSuccess)
-                    {
-                        NotificationService.ShowMessage("Status: Daten erfolgreich importiert!");
-                        Logger.LogInformation("Datenimport erfolgreich.");
-                        // --- UI Aktualisieren ---
-                        // Benachrichtige andere Teile (NavMenu), dass sich alles geändert hat
-                        CurrentStateService.NotifyStateChanged();
-                        // Navigiere zur Startseite, um Neuladen zu erzwingen (oder andere Methode)
-                        Navigation.NavigateTo("/", forceLoad: true);
-                    }
-                    else
-                    {
-                        Logger.LogError("Fehler im DataManagementService beim Importieren der Daten.");
-                        await Application.Current.MainPage.DisplayAlert("Importfehler", "Die Daten konnten nicht importiert werden. Prüfen Sie das Dateiformat und die Logs.", "OK");
-                    }
+                if (importSuccess)
+                {
+                    NotificationService.ShowMessage("Status: Daten erfolgreich importiert! Anwendung wird neu geladen.");
+                    Logger.LogInformation("Datenimport erfolgreich.");
+                    // Zustand zurücksetzen oder neu laden
+                    CurrentStateService.NotifyStateChanged();
+                    // Neu laden der aktuellen Seite oder zur Startseite navigieren
+                    Navigation.NavigateTo(Navigation.Uri, forceLoad: true); // Lädt die aktuelle Seite neu
+                    // Alternative: Navigation.NavigateTo("/", forceLoad: true);
                 }
                 else
                 {
-                    Logger.LogWarning("Ungültiger Dateityp für Import ausgewählt: {FileName}", result.FileName);
-                    await Application.Current.MainPage.DisplayAlert("Fehler", "Bitte wählen Sie eine gültige .json-Datei aus.", "OK");
+                    Logger.LogError("Fehler im DataManagementService beim Importieren der Daten.");
+                    await DialogService.ShowAlertAsync("Importfehler", "Die Daten konnten nicht importiert werden. Prüfen Sie das Dateiformat und die Logs.", "OK");
                 }
+            }
+            else if (result.Exception != null)
+            {
+                 Logger.LogError(result.Exception, "Fehler bei der Dateiauswahl.");
+                 await DialogService.ShowAlertAsync("Fehler", $"Fehler bei der Dateiauswahl: {result.Exception.Message}", "OK");
             }
             else
             {
-                // Benutzer hat den Picker abgebrochen
                 Logger.LogInformation("Dateiauswahl für Import abgebrochen.");
                 NotificationService.ShowMessage("Import abgebrochen.");
             }
         }
-        catch (Exception ex)
+        catch (IOException ioEx) // Spezieller Fehler beim Dateizugriff
+        {
+             Logger.LogError(ioEx, "Fehler beim Lesen der Importdatei.");
+             await DialogService.ShowAlertAsync("Fehler", "Die Importdatei konnte nicht gelesen werden. Überprüfen Sie die Berechtigungen.", "OK");
+        }
+        catch (Exception ex) // Allgemeiner Fehler
         {
             Logger.LogError(ex, "Unerwarteter Fehler beim Importvorgang.");
-            await Application.Current.MainPage.DisplayAlert("Fehler", "Ein unerwarteter Fehler ist beim Importieren aufgetreten.", "OK");
+            await DialogService.ShowAlertAsync("Fehler", "Ein unerwarteter Fehler ist beim Importieren aufgetreten.", "OK");
         }
         finally
         {
-            _isBusy = false; // Ladeanzeige beenden
+            _isBusy = false;
+            StateHasChanged();
         }
     }
 }

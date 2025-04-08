@@ -19,26 +19,39 @@ namespace LightEditor2.Core.Services
             _logger = logger;
         }
 
-        public async Task<List<Project>?> GetAllDataForExportAsync()
+        // Rückgabetyp angepasst auf FullExportData?
+        public async Task<FullExportData?> GetAllDataForExportAsync()
         {
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync();
             try
             {
-                // Alle Projekte mit *allen* zugehörigen Daten laden
+                // 1. Projekte laden (wie bisher, mit allen Includes)
                 var projects = await dbContext.Projects
                     .Include(p => p.SubGroups)
-                        .ThenInclude(s => s.Slides) // Wichtig: Alle Ebenen einschließen
-                    .OrderBy(p => p.Name) // Optional: Für konsistente Reihenfolge
-                    .AsNoTracking() // Wichtig für Performance bei reinen Leseoperationen
+                        .ThenInclude(s => s.Slides)
+                    .OrderBy(p => p.Name)
+                    .AsNoTracking()
                     .ToListAsync();
 
-                _logger.LogInformation("Alle {ProjectCount} Projekte für den Export geladen.", projects.Count);
-                return projects;
+                // 2. Settings laden
+                var settings = await dbContext.Settings
+                    .AsNoTracking()
+                    .ToListAsync();
+
+                _logger.LogInformation("Alle {ProjectCount} Projekte und {SettingsCount} Einstellungen für den Export geladen.", projects.Count, settings.Count);
+
+                // 3. DTO erstellen und zurückgeben
+                var exportData = new FullExportData
+                {
+                    Projects = projects,
+                    Settings = settings
+                };
+                return exportData;
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Fehler beim Laden aller Daten für den Export.");
-                return null; // Signalisiert einen Fehler
+                _logger.LogError(ex, "Fehler beim Laden aller Daten (Projekte & Settings) für den Export.");
+                return null;
             }
         }
 

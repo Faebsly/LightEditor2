@@ -2,8 +2,10 @@
 @using Microsoft.Extensions.Logging
 @using LightEditor2.RazorLib.Components.Shared
 
+
 @inherits LayoutComponentBase
 @inject NavigationManager Navigation
+@inject LightEditor2.Core.Abstractions.IDialogService DialogService
 @inject LightEditor2.Core.Services.CurrentStateService CurrentStateService
 @inject LightEditor2.Core.Services.ISubGroupService SubGroupService
 @implements IDisposable
@@ -46,7 +48,7 @@
         if (CurrentStateService.CurrentSubgroupId <= 0)
         {
             Logger.LogWarning("OpenSettings aufgerufen, aber CurrentSubgroupId ist ungültig ({CurrentSubgroupId}).", CurrentStateService.CurrentSubgroupId);
-            await Application.Current.MainPage.DisplayAlert("Info", "Keine gültige Untergruppe ausgewählt.", "OK");
+            await DialogService.ShowAlertAsync("Info", "Keine gültige Untergruppe ausgewählt.", "OK");
             return;
         }
 
@@ -58,7 +60,7 @@
         {
             Logger.LogDebug("Subgroup '{SubgroupName}' für Einstellungen gefunden.", subgroup.Name);
             // Zeigen Sie ein Popup an, das z. B. den Namen der Untergruppe anzeigt.
-            await Application.Current.MainPage.DisplayAlert(
+            await DialogService.ShowAlertAsync(
                 "Einstellungen",
                 $"Aktuelle Untergruppe: {subgroup.Name} (ID: {subgroup.Id})", // Name verwenden, falls vorhanden
                 "OK"
@@ -67,7 +69,7 @@
         else
         {
             Logger.LogError("Subgroup mit ID {CurrentSubgroupId} für Einstellungen nicht gefunden oder Ladefehler.", CurrentStateService.CurrentSubgroupId);
-            await Application.Current.MainPage.DisplayAlert(
+            await DialogService.ShowAlertAsync(
                "Fehler",
                $"Die Untergruppe mit der ID {CurrentStateService.CurrentSubgroupId} konnte nicht geladen werden.",
                "OK"
