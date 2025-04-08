@@ -94,7 +94,7 @@
         Logger.LogInformation("Auswahl des Exportpfads gestartet.");
         try
         {
-            FolderPickerResult result = await FolderPickerService.PickFolderAsync(default); // CancellationToken.None
+            AppFolderPickerResult result = await FolderPickerService.PickFolderAsync(default); // CancellationToken.None
 
             if (result.IsSuccessful && result.Path != null)
             {
@@ -181,7 +181,7 @@
             string suggestedName = $"EditorFullDataExport_{DateTime.Now:yyyyMMdd_HHmmss}.json";
             using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(jsonString));
 
-            FileSaverResult fileSaverResult = await FileSaverService.SaveAsync(suggestedName, stream, default);
+            AppFileSaverResult fileSaverResult = await FileSaverService.SaveAsync(suggestedName, stream, default);
 
             if (fileSaverResult.IsSuccessful)
             {

@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace LightEditor2.Core.Abstractions
 {
     // Vereinfachtes Ergebnisobjekt
-    public class FolderPickerResult
+    public class AppFolderPickerResult
     {
         public bool IsSuccessful { get; set; }
         public string? Path { get; set; }
@@ -14,6 +14,6 @@ namespace LightEditor2.Core.Abstractions
 
     public interface IFolderPickerService
     {
-        Task<FolderPickerResult> PickFolderAsync(CancellationToken cancellationToken = default);
+        Task<AppFolderPickerResult> PickFolderAsync(CancellationToken cancellationToken = default);
     }
 }
