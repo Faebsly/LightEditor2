@@ -1,0 +1,84 @@
+﻿<!-- MainLayout.razor -->
+@using Microsoft.Extensions.Logging
+@using LightEditor2.RazorLib.Components.Shared
+
+@inherits LayoutComponentBase
+@inject NavigationManager Navigation
+@inject LightEditor2.Core.Services.CurrentStateService CurrentStateService
+@inject LightEditor2.Core.Services.ISubGroupService SubGroupService
+@implements IDisposable
+@inject ILogger<MainLayout> Logger
+
+
+<div class="page">
+    <div class="sidebar bg-dark text-light">
+        <NavMenu />
+    </div>
+
+    <main>
+        
+        
+        <article class="bg-dark text-light p-3">
+            @Body
+        </article>
+    </main>
+    <NotificationDisplay />
+</div>
+
+@code {
+    protected override void OnInitialized() // Nicht async, da nur Event registriert wird
+    {
+        // Abonnieren des globalen Zustandswechsels, um den Header neu zu rendern
+        CurrentStateService.OnChange += OnCurrentStateChanged;
+        Logger.LogDebug("MainLayout initialized, subscribed to CurrentStateService.OnChange");
+    }
+
+    private void OnCurrentStateChanged() // Methode statt Lambda
+    {
+        // Sicherstellen, dass UI-Updates im richtigen Thread passieren
+        InvokeAsync(StateHasChanged);
+        Logger.LogDebug("CurrentStateService.OnChange ausgelöst in MainLayout, StateHasChanged aufgerufen.");
+    }
+
+    // Methode zu async Task ändern
+    private async Task OpenSettings()
+    {
+        if (CurrentStateService.CurrentSubgroupId <= 0)
+        {
+            Logger.LogWarning("OpenSettings aufgerufen, aber CurrentSubgroupId ist ungültig ({CurrentSubgroupId}).", CurrentStateService.CurrentSubgroupId);
+            await Application.Current.MainPage.DisplayAlert("Info", "Keine gültige Untergruppe ausgewählt.", "OK");
+            return;
+        }
+
+        Logger.LogDebug("OpenSettings aufgerufen für SubgroupId: {CurrentSubgroupId}.", CurrentStateService.CurrentSubgroupId);
+        // GetSubGroupByIdAsync gibt jetzt SubGroup? zurück
+        var subgroup = await SubGroupService.GetSubGroupByIdAsync(CurrentStateService.CurrentSubgroupId);
+
+        if (subgroup != null)
+        {
+            Logger.LogDebug("Subgroup '{SubgroupName}' für Einstellungen gefunden.", subgroup.Name);
+            // Zeigen Sie ein Popup an, das z. B. den Namen der Untergruppe anzeigt.
+            await Application.Current.MainPage.DisplayAlert(
+                "Einstellungen",
+                $"Aktuelle Untergruppe: {subgroup.Name} (ID: {subgroup.Id})", // Name verwenden, falls vorhanden
+                "OK"
+            );
+        }
+        else
+        {
+            Logger.LogError("Subgroup mit ID {CurrentSubgroupId} für Einstellungen nicht gefunden oder Ladefehler.", CurrentStateService.CurrentSubgroupId);
+            await Application.Current.MainPage.DisplayAlert(
+               "Fehler",
+               $"Die Untergruppe mit der ID {CurrentStateService.CurrentSubgroupId} konnte nicht geladen werden.",
+               "OK"
+           );
+        }
+    }
+
+    // Dispose-Methode implementieren
+    public void Dispose()
+    {
+        CurrentStateService.OnChange -= OnCurrentStateChanged;
+        Logger.LogDebug("MainLayout disposed, unsubscribed from CurrentStateService.OnChange");
+    }
+}

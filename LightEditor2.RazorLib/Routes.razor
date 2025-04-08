@@ -1,0 +1,15 @@
+@* LightEditor2.RazorLib/Routes.razor *@
+<Router AppAssembly="typeof(Routes).Assembly" AdditionalAssemblies="new[] { typeof(LightEditor2.Core.Models.Project).Assembly }">
+    @* Sucht Routen in dieser Assembly und optional in Core *@
+    <Found Context="routeData">
+        <RouteView RouteData="@routeData" DefaultLayout="@typeof(Components.Layout.MainLayout)" /> @* Namespace für MainLayout ggf. anpassen *@
+        <FocusOnNavigate RouteData="@routeData" Selector="h1" />
+    </Found>
+    <NotFound>
+        <PageTitle>Nicht gefunden</PageTitle>
+        <LayoutView Layout="@typeof(Components.Layout.MainLayout)">
+            @* Namespace für MainLayout ggf. anpassen *@
+            <p role="alert">Entschuldigung, unter dieser Adresse gibt es nichts.</p>
+        </LayoutView>
+    </NotFound>
+</Router>

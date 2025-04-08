@@ -1,0 +1,310 @@
+﻿@page "/slideeditor/{subgroupId:int}"
+@using LightEditor2.Core.Models
+@using Microsoft.Extensions.Logging
+@inject LightEditor2.Core.Services.ISlideService SlideService
+@inject LightEditor2.Core.Services.ISubGroupService SubGroupService
+@inject LightEditor2.Core.Services.IProjectService ProjectService
+@inject LightEditor2.Core.Services.CurrentStateService CurrentStateService
+@inject NavigationManager Navigation
+@inject ILogger<SlideEditor> Logger
+@inject LightEditor2.Core.Services.NotificationService NotificationService
+
+<h1 class="m-0">@CurrentStateService.HeaderText</h1>
+
+<div class="container bg-dark text-light p-3">
+    <div class="slide-list mt-3">
+        @if (slides == null)
+        {
+            <p>Lade Slides...</p>
+        }
+        else if (slides.Count == 0)
+        {
+            <p>Kein Slide vorhanden.</p>
+        }
+        else
+        {
+            @foreach (var (slide, index) in slides.Select((value, i) => (value, i)))
+            {
+                <div class="card bg-secondary mb-3">
+                    <div class="card-body">
+                        <div class="form-group">
+                            <label>Slide @(index + 1) - Sprachscript</label>
+                            <textarea class="form-control bg-dark text-light" rows="1" @bind="slide.Title"></textarea>
+                        </div>
+                        <div class="form-group mt-2">
+                            <label>Textbasierte Designvorstellung</label>
+                            <textarea class="form-control bg-dark text-light" rows="1" @bind="slide.Content"></textarea>
+                        </div>
+                        <div class="form-group mt-2">
+                            <label>AI-Prompt-Text</label>
+                            <textarea class="form-control bg-dark text-light" rows="1" @bind="slide.Prompt"></textarea>
+                        </div>
+                        <div class="mt-2">
+                            <button class="btn btn-danger" @onclick="() => DeleteSlide(slide)">Löschen</button>
+                        </div>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+
+    <div class="d-flex justify-content-between mt-3">
+        <button class="btn btn-primary" @onclick="AddSlide">+ Neues Slide hinzufügen</button>
+        <button class="btn btn-success" @onclick="SaveAllSlides">Alle Slides speichern</button>
+        <button class="btn btn-danger" @onclick="DeleteCurrentSubgroup">Gruppe löschen</button>
+    </div>
+</div>
+
+@code {
+    [Parameter]
+    public int subgroupId { get; set; }
+
+    private SubGroup? subgroup;
+    private Project? project;
+    private List<Slide> slides = new();
+
+
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadData();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadData();
+    }
+
+    private async Task LoadData()
+    {
+        Logger.LogInformation("Lade Daten für SubgroupId: {SubgroupId}", subgroupId);
+        subgroup = await SubGroupService.GetSubGroupByIdAsync(subgroupId); // Annahme: Gibt SubGroup? zurück (sollten wir später prüfen!)
+
+        if (subgroup != null)
+        {   
+            // Erfolgreich geladen
+            Logger.LogDebug("SubGroup '{SubgroupName}' (ID: {SubgroupId}) gefunden.", subgroup.Name, subgroupId);
+
+            project = await ProjectService.GetProjectByIdAsync(subgroup.ProjectId);
+
+            if (project != null) // Zusätzliche Prüfung hier!
+            {
+                slides = await SlideService.GetSlidesBySubGroupIdAsync(subgroup.Id); // Annahme: Gibt leere Liste bei Fehler/nicht gefunden
+
+                // Zustand aktualisieren
+                CurrentStateService.CurrentProjectName = project.Name ?? "Unbekanntes Projekt"; // Null-Coalescing für Sicherheit
+                CurrentStateService.CurrentSubgroupName = subgroup.Name ?? "Unbekannte Gruppe"; // Null-Coalescing für Sicherheit
+                CurrentStateService.CurrentSubgroupId = subgroup.Id;
+                Logger.LogInformation("Daten für Projekt '{ProjectName}' -> Gruppe '{SubgroupName}' geladen.", project.Name, subgroup.Name);
+            }
+            else
+            {
+                Logger.LogWarning("Projekt mit ID {ProjectId} für Subgroup {SubgroupId} nicht gefunden.", subgroup.ProjectId, subgroupId);
+                // Behandlung, wenn das Projekt nicht gefunden wurde
+                slides.Clear();
+                CurrentStateService.CurrentProjectName = "Projekt nicht gefunden";
+                CurrentStateService.CurrentSubgroupName = subgroup.Name ?? "Unbekannte Gruppe";
+                CurrentStateService.CurrentSubgroupId = subgroup.Id;
+                // Optional: Navigation oder Fehlermeldung
+                // Navigation.NavigateTo("/"); // Beispiel: Zurück zur Startseite
+                await Application.Current.MainPage.DisplayAlert("Fehler", "Das zugehörige Projekt konnte nicht geladen werden.", "OK");
+
+            }
+        }
+        else
+        {
+            // SubGroup nicht gefunden ODER Fehler beim Laden (wird im Service geloggt)
+            Logger.LogWarning("Subgroup mit ID {SubgroupId} nicht gefunden oder Ladefehler.", subgroupId);
+            slides.Clear();
+            // Zustand zurücksetzen oder Fehlermeldung anzeigen
+            CurrentStateService.CurrentProjectName = "";
+            CurrentStateService.CurrentSubgroupName = "Gruppe nicht gefunden";
+            CurrentStateService.CurrentSubgroupId = 0;
+            await Application.Current.MainPage.DisplayAlert("Fehler", "Die ausgewählte Gruppe konnte nicht geladen werden.", "OK");
+            // Optional: Zurück navigieren
+            // Navigation.NavigateTo("/");
+        }
+        // StateHasChanged wird am Ende benötigt, um die UI zu aktualisieren
+        CurrentStateService.NotifyStateChanged(); // Um sicherzustellen, dass der Header aktualisiert wird
+        StateHasChanged();
+    }
+
+    private async Task SaveAllSlides()
+    {
+        if (slides == null || !slides.Any())
+        {
+            Logger.LogInformation("Keine Slides zum Speichern vorhanden.");
+            return; // Nichts zu tun
+        }
+
+        Logger.LogInformation("Speichere {SlideCount} Slides für SubgroupId: {SubgroupId}", slides.Count, subgroupId);
+        bool allSucceeded = true;
+        int successCount = 0;
+        var updateTasks = new List<Task<bool>>();
+
+        // Starte alle Update-Tasks
+        foreach (var slide in slides)
+        {
+            // Wichtige Annahme: slide-Objekt wurde durch @bind in der UI modifiziert
+            updateTasks.Add(SlideService.UpdateSlideAsync(slide));
+        }
+
+        // Warte auf alle Tasks und sammle Ergebnisse
+        bool[] results = await Task.WhenAll(updateTasks);
+
+        // Prüfe die Ergebnisse
+        for (int i = 0; i < results.Length; i++)
+        {
+            if (results[i])
+            {
+                successCount++;
+            }
+            else
+            {
+                allSucceeded = false;
+                // Finde den zugehörigen Slide für die Fehlermeldung (optional)
+                var failedSlide = slides[i];
+                Logger.LogError("Fehler beim Speichern von Slide '{SlideTitle}' (ID: {SlideId})", failedSlide.Title, failedSlide.Id);
+                // Man könnte hier auch spezifischere Fehler sammeln
+            }
+        }
+
+        if (allSucceeded)
+        {
+            Logger.LogInformation("Alle {SuccessCount} Slides erfolgreich gespeichert.", successCount);
+            //await Application.Current.MainPage.DisplayAlert("Erfolg", "Alle Slides wurden gespeichert.", "OK");
+            NotificationService.ShowMessage("Status: Alle Slides wurden gespeichert.");
+
+        }
+        else
+        {
+            int failureCount = slides.Count - successCount;
+            Logger.LogWarning("{SuccessCount} von {TotalCount} Slides gespeichert, {FailureCount} fehlgeschlagen.", successCount, slides.Count, failureCount);
+            await Application.Current.MainPage.DisplayAlert("Teilweise Fehler", $"{successCount} von {slides.Count} Slides gespeichert. Bei {failureCount} Slides gab es Probleme. Prüfen Sie die Logs für Details.", "OK");
+        }
+
+        // Optional: Liste neu laden, um sicherzustellen, dass der Zustand aktuell ist
+        // Dies ist nicht unbedingt nötig, wenn das Binden korrekt funktioniert,
+        // kann aber bei komplexen Szenarien oder zur Sicherheit sinnvoll sein.
+        slides = await SlideService.GetSlidesBySubGroupIdAsync(subgroupId);
+        StateHasChanged();
+    }
+
+    private async Task AddSlide()
+    {
+        Logger.LogInformation("Füge neuen Slide zu SubgroupId: {SubgroupId} hinzu.", subgroupId);
+        var newSlide = new Slide
+            {
+                Title = "", // Standardwerte setzen
+                Content = "",
+                Prompt = "",
+                SubGroupId = subgroupId // Wichtig: SubgroupId korrekt zuweisen
+            };
+
+        // Zuerst versuchen, alle bestehenden Änderungen zu speichern
+        // (optional, aber kann Konflikte vermeiden, wenn das Hinzufügen fehlschlägt)
+        // await SaveAllSlides(); // Oder Speichern *nach* dem Hinzufügen
+
+        bool successAdd = await SlideService.AddSlideAsync(newSlide);
+
+        if (successAdd)
+        {
+            Logger.LogInformation("Neuer Slide erfolgreich in DB hinzugefügt.");
+
+            // Jetzt sicherstellen, dass alle Änderungen (auch an anderen Slides) gespeichert sind.
+            // Wichtig, falls der User vor dem Klick auf "AddSlide" etwas geändert hat.
+            await SaveAllSlides(); // Aufruf hier einfügen!
+
+            // Liste neu laden, um den neuen Slide (und ggf. gespeicherte Änderungen an anderen) anzuzeigen
+            slides = await SlideService.GetSlidesBySubGroupIdAsync(subgroupId);
+            StateHasChanged(); // UI aktualisieren
+        }
+        else
+        {
+            Logger.LogError("Fehler beim Hinzufügen des neuen Slides für SubgroupId: {SubgroupId}.", subgroupId);
+            await Application.Current.MainPage.DisplayAlert("Fehler", "Der neue Slide konnte nicht hinzugefügt werden.", "OK");
+        }
+    }
+
+    private async Task DeleteSlide(Slide slide)
+    {
+        if (slide == null) return;
+
+        // Bestätigung für das LÖSCHEN DES SLIDES
+        bool confirmDelete = await Application.Current.MainPage.DisplayAlert(
+            "Slide löschen", // Korrekter Titel
+            $"Möchten Sie das Slide '{slide.Title}' wirklich löschen?", // Korrekte Nachricht
+            "Ja", "Nein");
+
+        if (!confirmDelete)
+        {
+            return;
+        }
+
+        Logger.LogInformation("Lösche Slide '{SlideTitle}' (ID: {SlideId}) von SubgroupId: {SubgroupId}", slide.Title, slide.Id, subgroupId);
+
+        // Aufruf an den SLIDE Service
+        bool success = await SlideService.DeleteSlideAsync(slide.Id);
+
+        if (success)
+        {
+            Logger.LogInformation("Slide (ID: {SlideId}) erfolgreich gelöscht, lade Slides neu.", slide.Id);
+            // Slide aus der lokalen Liste entfernen ODER Liste neu laden
+            // slides.Remove(slide); // Alternative, wenn Neuladen zu langsam ist
+            slides = await SlideService.GetSlidesBySubGroupIdAsync(subgroupId); // Sicherer
+            StateHasChanged(); // UI aktualisieren
+        }
+        else
+        {
+            Logger.LogError("Fehler beim Löschen des Slides (ID: {SlideId}).", slide.Id);
+            await Application.Current.MainPage.DisplayAlert("Fehler", "Das Slide konnte nicht gelöscht werden.", "OK");
+        }
+    }
+
+    private async Task DeleteCurrentSubgroup()
+    {
+        // Prüfung, ob subgroup überhaupt geladen ist
+        if (subgroup == null)
+        {
+            Logger.LogWarning("Versuch, eine nicht geladene SubGroup zu löschen.");
+            await Application.Current.MainPage.DisplayAlert("Fehler", "Keine Gruppe zum Löschen ausgewählt oder geladen.", "OK");
+            return;
+        }
+
+        // Name für Dialog verwenden (aus subgroup Objekt)
+        string groupName = subgroup.Name ?? "diese Gruppe"; // Sicherer Zugriff
+
+        // Bestätigungsabfrage für die GRUPPE
+        bool confirm = await Application.Current.MainPage.DisplayAlert(
+            "Gruppe löschen", // Korrekter Titel
+            $"Möchten Sie {groupName} (ID: {subgroup.Id}) wirklich löschen? Alle zugehörigen Slides werden ebenfalls entfernt.", // Korrekte Nachricht
+            "Ja",
+            "Nein");
+
+        if (confirm) // subgroup ist hier definitiv nicht null
+        {
+            Logger.LogInformation("Versuche SubGroup '{SubgroupName}' (ID: {SubgroupId}) zu löschen.", groupName, subgroup.Id);
+
+            // Aufruf an den SUBGROUP Service und Ergebnis prüfen
+            bool success = await SubGroupService.DeleteSubGroupAsync(subgroup.Id);
+
+            if (success)
+            {
+                Logger.LogInformation("SubGroup (ID: {SubgroupId}) erfolgreich gelöscht.", subgroup.Id);
+                // Globalen Zustand aktualisieren und zurück navigieren
+                CurrentStateService.CurrentProjectName = ""; // Zustand zurücksetzen
+                CurrentStateService.CurrentSubgroupName = "";
+                CurrentStateService.CurrentSubgroupId = 0;
+                CurrentStateService.NotifyStateChanged(); // Sidebar/Header aktualisieren lassen
+                //await Application.Current.MainPage.DisplayAlert("Erfolg", $"{groupName} wurde gelöscht.", "OK"); // Korrekte Erfolgsmeldung
+                NotificationService.ShowMessage($"Status: {groupName} wurde gelöscht.");
+                Navigation.NavigateTo("/"); // Zurück zur Hauptseite
+            }
+            else
+            {
+                Logger.LogError("Fehler beim Löschen der SubGroup (ID: {SubgroupId}).", subgroup.Id);
+                await Application.Current.MainPage.DisplayAlert("Fehler", $"{groupName} konnte nicht gelöscht werden.", "OK"); // Korrekte Fehlermeldung
+            }
+        }
+    }
+}

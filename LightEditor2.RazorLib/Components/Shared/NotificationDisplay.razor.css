@@ -1,0 +1,59 @@
+/* Components/Shared/NotificationDisplay.razor.css */
+
+.status-notification {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%; /* Kann bleiben oder durch Flexbox implizit sein */
+    background-color: #212529;
+    color: #f8f9fa;
+    padding: 4px 15px;
+    font-size: 0.85rem;
+    z-index: 1050;
+    border-top: 1px solid #495057;
+    /* Animationen bleiben wie zuvor */
+    animation: fadein 0.5s, fadeout 0.5s 3.5s;
+    opacity: 1;
+    /* Kein display: flex hier nötig, wird durch Bootstrap-Klasse gesetzt */
+}
+
+.app-version {
+    /* Optional: Leicht andere Farbe oder Stil für die Version */
+    opacity: 0.8; /* Etwas dezenter */
+    margin-left: 15px; /* Abstand zur Statusmeldung */
+}
+
+/* Fade-in Animation (optional) */
+@keyframes fadein {
+    from {
+        bottom: -30px;
+        opacity: 0;
+    }
+
+    to {
+        bottom: 0;
+        opacity: 1;
+    }
+}
+
+/* Fade-out Animation (optional) - Zeit muss zur Dauer im Service passen! */
+@keyframes fadeout {
+    from {
+        bottom: 0;
+        opacity: 1;
+    }
+
+    to {
+        bottom: -30px;
+        opacity: 0;
+        display: none;
+    }
+    /* display: none am Ende optional */
+}
+
+/* Fallback ohne Animation */
+/* Wenn keine Animation gewünscht wird, die 'animation'-Zeile oben entfernen */
+
+/* Wichtig: Wenn die Dauer im Service geändert wird (nicht 4000ms), muss
+   der zweite Zeitwert in der 'animation'-Zeile angepasst werden (Dauer - Fadeout-Zeit)!
+   Beispiel für 5s Dauer: animation: fadein 0.5s, fadeout 0.5s 4.5s; */

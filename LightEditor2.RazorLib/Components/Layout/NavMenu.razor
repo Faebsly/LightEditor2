@@ -1,0 +1,390 @@
+﻿@using Microsoft.Extensions.Logging
+@inject LightEditor2.Core.Services.IProjectService ProjectService
+@inject LightEditor2.Core.Services.ISubGroupService SubGroupService
+@inject LightEditor2.Core.Services.CurrentStateService CurrentStateService
+@inject NavigationManager Navigation
+@inject ILogger<NavMenu> Logger
+@inject LightEditor2.Core.Services.NotificationService NotificationService
+
+
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="flex-column bg-dark text-light p-3">
+
+        <div class="nav-item">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                @* mb-2 für Abstand nach unten *@
+
+                @* Linke Seite: Titel *@
+                <h5 class="m-0">Projekte</h5> @* m-0 entfernt Standard-Margin für bessere Zentrierung *@
+
+                @* Rechte Seite: Home-Button als Icon *@
+                <a href="/"
+                   class="btn btn-link text-light d-inline-flex align-items-center justify-content-center"
+                   aria-label="Zur Startseite"
+                   style="min-width: 1.5em; height: 1.5em; line-height: 1; padding: 0;">
+                   
+                    @* btn-link für Button-Anmutung ohne Rahmen, p-0 für kein Padding *@
+                    <i class="bi bi-house-door-fill fs-5"></i> @* Bootstrap Icon, fs-5 für Größe *@
+                </a>
+
+            </div>
+            <div class="list-group">
+                @projectsFragment
+            </div>
+        </div>
+
+    </nav>
+</div>
+
+@code {
+    private List<LightEditor2.Core.Models.Project> projects = new();
+    private RenderFragment? projectsFragment;
+
+    private async Task LoadProjects()
+    {
+        projects = await ProjectService.GetProjectsAsync();
+        projectsFragment = BuildProjectsFragment(projects);
+        StateHasChanged();
+    }
+
+    private RenderFragment BuildProjectsFragment(List<LightEditor2.Core.Models.Project> projects) => builder =>
+    {
+        int seq = 0;
+        if (projects == null || projects.Count == 0)
+        {
+            builder.OpenElement(seq++, "button");
+            builder.AddAttribute(seq++, "class", "btn btn-dark");
+            builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, AddProject));
+            builder.AddContent(seq++, "+ Projekt hinzufügen");
+            builder.CloseElement();
+        }
+        else
+        {
+            foreach (var project in projects)
+            {
+                builder.OpenElement(seq++, "div");
+                builder.AddAttribute(seq++, "class", "list-group-item bg-secondary text-light mb-2");
+
+                builder.OpenElement(seq++, "div");
+                builder.AddAttribute(seq++, "class", "d-flex justify-content-between align-items-center");
+
+                builder.OpenElement(seq++, "span");
+                builder.AddContent(seq++, project.Name);
+                builder.CloseElement();
+
+                builder.OpenElement(seq++, "button");
+                    builder.AddAttribute(seq++, "class", "btn btn-sm btn-dark ms-2");
+                    builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, () => AddSubGroup(project.Id)));
+                    builder.AddContent(seq++, "+");
+                builder.CloseElement();
+
+                builder.CloseElement(); // Ende Kopfzeile
+
+                if (project.SubGroups != null && project.SubGroups.Any())
+                {
+                    builder.OpenElement(seq++, "div");
+                    builder.AddAttribute(seq++, "class", "subgroup-list ms-3 mt-2");
+                    foreach (var subgroup in project.SubGroups)
+                    {
+                        builder.OpenComponent<Microsoft.AspNetCore.Components.Routing.NavLink>(seq++);
+                        builder.AddAttribute(seq++, "class", "nav-link text-light");
+                        builder.AddAttribute(seq++, "href", $"/slideeditor/{subgroup.Id}");
+                        builder.AddAttribute(seq++, "ChildContent", (RenderFragment)((childBuilder) =>
+                        {
+                            childBuilder.AddContent(seq++, "- " + subgroup.Name);
+                        }));
+                        builder.CloseComponent();
+                    }
+                    builder.CloseElement();
+                }
+                else
+                {
+                    builder.OpenElement(seq++, "div");
+                    builder.AddAttribute(seq++, "class", "text-muted ms-3 mt-2");
+                    builder.AddContent(seq++, "Keine Untergruppen");
+                    builder.CloseElement();
+                }
+
+                builder.CloseElement(); // Ende Projekt-Container
+            }
+
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "list-group-item d-flex justify-content-between");
+
+            // Button für Neues Projekt (links)
+            builder.OpenElement(seq++, "button");
+            builder.AddAttribute(seq++, "class", "btn btn-dark w-100");
+            builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, AddProject));
+            builder.AddContent(seq++, "+");
+            builder.CloseElement();
+
+            // Roter Button zum Löschen der aktuellen Gruppe (rechts)
+            builder.OpenElement(seq++, "button");
+            builder.AddAttribute(seq++, "class", "btn btn-danger flex-fill");
+            builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, DeleteProjectDialog));
+            builder.AddContent(seq++, "-");
+            builder.CloseElement();
+            builder.CloseElement();
+
+            // Unterhalb des Plus-Buttons einen Export-Button hinzufügen:
+            builder.OpenElement(seq++, "div");
+            builder.AddAttribute(seq++, "class", "list-group-item");
+            builder.OpenElement(seq++, "button");
+            builder.AddAttribute(seq++, "class", "btn btn-warning w-100"); // Farbe anpassen: btn-warning ist z.B. gelb/orange
+            builder.AddAttribute(seq++, "onclick", EventCallback.Factory.Create(this, ExportProjectDialogAsync));
+            builder.AddContent(seq++, "Exportieren");
+            builder.CloseElement();
+            builder.CloseElement();
+
+
+        }
+    };
+
+    private async Task AddProject()
+    {
+        string? projectName = await Application.Current.MainPage.DisplayPromptAsync(
+            "Neues Projekt",
+            "Projektnamen:",
+            accept: "OK",
+            cancel: "Abbrechen",
+            placeholder: "Bitte geben Sie den Projektnamen ein:",
+            keyboard: Keyboard.Text
+        );
+
+        if (!string.IsNullOrWhiteSpace(projectName))
+        {
+            var newProject = new LightEditor2.Core.Models.Project
+                {
+                    Name = projectName,
+                // SubGroups werden automatisch initialisiert (siehe Modell)
+                };
+
+            // Aufruf anpassen und Ergebnis prüfen
+            bool success = await ProjectService.AddProjectAsync(newProject);
+
+            if (success)
+            {
+                Logger.LogInformation("Projekt '{ProjectName}' hinzugefügt, lade Projekte neu.", projectName);
+                await LoadProjects(); // Lade Projekte neu (oder füge nur das neue hinzu für bessere Performance)
+                // StateHasChanged(); // Wird durch LoadProjects ausgelöst
+            }
+            else
+            {
+                Logger.LogError("Fehler beim Hinzufügen des Projekts '{ProjectName}'.", projectName);
+                // Fehlermeldung für den Benutzer anzeigen
+                await Application.Current.MainPage.DisplayAlert("Fehler", "Das Projekt konnte nicht hinzugefügt werden.", "OK");
+            }
+        }
+    }
+
+    private async Task AddSubGroup(int projectId)
+    {
+        string? subgroupName = await Application.Current.MainPage.DisplayPromptAsync(
+        "Neue Untergruppe",
+        "Bitte geben Sie den Namen der Untergruppe ein:",
+        "OK",
+        "Abbrechen");
+
+        if (!string.IsNullOrWhiteSpace(subgroupName))
+        {
+            var newSubgroup = new LightEditor2.Core.Models.SubGroup
+                {
+                    Name = subgroupName,
+                    ProjectId = projectId
+                // Slides werden im Modell initialisiert
+                };
+
+            // Aufruf anpassen und Ergebnis prüfen
+            bool success = await SubGroupService.AddSubGroupAsync(newSubgroup);
+
+            if (success)
+            {
+                Logger.LogInformation("SubGroup '{SubgroupName}' zu Projekt ID {ProjectId} hinzugefügt.", subgroupName, projectId);
+                // Projektliste neu laden, um die neue SubGroup anzuzeigen
+                await LoadProjects();
+                // StateHasChanged(); // Wird durch LoadProjects ausgelöst
+            }
+            else
+            {
+                Logger.LogError("Fehler beim Hinzufügen der SubGroup '{SubgroupName}' zu Projekt ID {ProjectId}.", subgroupName, projectId);
+                await Application.Current.MainPage.DisplayAlert("Fehler", "Die Untergruppe konnte nicht hinzugefügt werden.", "OK");
+            }
+        }
+    }
+
+    private async Task DeleteProjectDialog()
+    {
+        var projects = await ProjectService.GetProjectsAsync(); // Lädt jetzt mit Logging/Fehlerbehandlung im Service
+        if (projects == null || !projects.Any())
+        {
+            await Application.Current.MainPage.DisplayAlert("Info", "Keine Projekte zum Löschen vorhanden.", "OK");
+            return;
+        }
+
+        var options = projects.Select(p => p.Name).ToArray();
+        var action = await Application.Current.MainPage.DisplayActionSheet(
+            "Lösche Projekt...",
+            "Abbrechen",
+            null, // 'null' für den "destructive" Button (wird oft rot dargestellt)
+            options);
+
+        if (action == "Abbrechen" || string.IsNullOrEmpty(action)) // Sicherstellen, dass eine Auswahl getroffen wurde
+        {
+            return;
+        }
+
+        var projectToDelete = projects.FirstOrDefault(p => p.Name == action);
+        if (projectToDelete != null)
+        {
+            bool confirm = await Application.Current.MainPage.DisplayAlert(
+                "Projekt löschen",
+                $"Möchten Sie das Projekt '{projectToDelete.Name}' wirklich löschen? Alle zugehörigen Untergruppen und Slides werden ebenfalls gelöscht (wegen Cascade Delete).", // Hinweis hinzugefügt
+                "Ja",
+                "Nein");
+
+            if (confirm)
+            {
+                // Aufruf anpassen und Ergebnis prüfen
+                bool success = await ProjectService.DeleteProjectAsync(projectToDelete.Id);
+
+                if (success)
+                {
+                    Logger.LogInformation("Projekt '{ProjectName}' (ID: {ProjectId}) gelöscht.", projectToDelete.Name, projectToDelete.Id);
+                    CurrentStateService.NotifyStateChanged(); // Benachrichtigt andere Teile (z.B. Header)
+                    await LoadProjects(); // Liste neu laden
+                    //await Application.Current.MainPage.DisplayAlert("Erfolg", $"Das Projekt '{projectToDelete.Name}' wurde gelöscht.", "OK"); // Erfolgsmeldung
+                    NotificationService.ShowMessage($"Status: Projekt '{projectToDelete.Name}' wurde gelöscht.");
+                }
+                else
+                {
+                    Logger.LogError("Fehler beim Löschen des Projekts '{ProjectName}' (ID: {ProjectId}).", projectToDelete.Name, projectToDelete.Id);
+                    // Fehlermeldung für den Benutzer anzeigen
+                    await Application.Current.MainPage.DisplayAlert("Fehler", $"Das Projekt '{projectToDelete.Name}' konnte nicht gelöscht werden.", "OK");
+                }
+            }
+        }
+        else
+        {
+            Logger.LogWarning("Ausgewähltes Projekt '{Action}' zum Löschen nicht in der Liste gefunden.", action);
+            // Optional: Fehlermeldung
+            await Application.Current.MainPage.DisplayAlert("Fehler", "Das ausgewählte Projekt wurde nicht gefunden.", "OK");
+        }
+    }
+
+    // Beispielmethode zum Öffnen des Exportdialogs
+    private async Task ExportProjectDialogAsync()
+    {
+        // Alle Projekte laden
+        var projects = await ProjectService.GetProjectsAsync();
+        if (projects == null || !projects.Any())
+        {
+            await Application.Current.MainPage.DisplayAlert("Export", "Keine Projekte vorhanden.", "OK");
+            return;
+        }
+
+        // Erstellen Sie ein Array mit den Projektnamen als Auswahloptionen
+        var options = projects.Select(p => p.Name).ToArray();
+
+        // Zeigen Sie das ActionSheet an; "Abbrechen" ist die Abbruchoption
+        var selected = await Application.Current.MainPage.DisplayActionSheet(
+            "Zu Exportierendes Projekt...",
+            "Abbrechen",
+            null,
+            options);
+
+        if (string.IsNullOrEmpty(selected) || selected == "Abbrechen")
+        {
+            return;
+        }
+
+        // Suchen Sie das Projekt, das zum ausgewählten Namen passt
+        var projectToExport = projects.FirstOrDefault(p => p.Name == selected);
+        if (projectToExport != null)
+        {
+            await ExportProjectAsync(projectToExport);
+        }
+    }
+
+    // Methode zum Exportieren eines Projekts als JSON
+    private async Task ExportProjectAsync(LightEditor2.Core.Models.Project project)
+    {
+        // Optional: Wenn Ihre Navigationseigenschaften nicht geladen sind, können Sie sie hier nachladen.
+        // Dies ist nur nötig, wenn Sie sie nicht bereits in der Abfrage einbeziehen.
+        // project = await _dbContext.Projects
+        //     .Include(p => p.SubGroups)
+        //         .ThenInclude(s => s.Slides)
+        //     .FirstOrDefaultAsync(p => p.Id == project.Id);
+
+        // Erstellen eines anonymen Objekts (DTO), das die relevanten Daten enthält.
+        var exportData = new
+        {
+            project.Id,
+            project.Name,
+            SubGroups = project.SubGroups?.Select(s => new
+            {
+                s.Id,
+                s.Name,
+                Slides = s.Slides?.Select(sl => new
+                {
+                    sl.Id,
+                    sl.Title,
+                    sl.Content,
+                    sl.Prompt
+                })
+            })
+        };
+
+        // Serialisieren Sie das Objekt in JSON
+        var json = System.Text.Json.JsonSerializer.Serialize(exportData, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+
+        // Ermitteln des Zeitstempels im Format yyyy-MM-dd_HHmmss
+        var now = DateTime.Now;
+        string timestamp = now.ToString("yyyy-MM-dd_HHmmss");
+
+        // Erstellen des Dateinamens: projektname_yyyy-MM-dd_HHmmss.json
+        string safeName = project.Name.Replace(" ", "_");
+        string fileName = $"{safeName}_{timestamp}.json";
+
+        // Fester Exportpfad (z. B. C:\Exports)
+        string exportFolder = @"C:\Users\Cina\Documents\Firma\Projekte\Projekt Doodle\LightEditor_Exports";
+        if (!Directory.Exists(exportFolder))
+        {
+            Directory.CreateDirectory(exportFolder);
+        }
+        string filePath = Path.Combine(exportFolder, fileName);
+
+        // JSON in Datei schreiben
+        await File.WriteAllTextAsync(filePath, json);
+
+        // Rückmeldung anzeigen
+        //await Application.Current.MainPage.DisplayAlert("Export", $"Projekt '{project.Name}' wurde exportiert nach:\n{filePath}", "OK");
+        NotificationService.ShowMessage($"Status: Projekt '{project.Name}' wurde exportiert nach:\n{filePath}");
+    }
+
+    // WICHTIG: Event-Handler abmelden! (Behandelt Kritischen Punkt 2 teilweise)
+    public void Dispose() // Implementieren, falls nicht vorhanden
+    {
+        CurrentStateService.OnChange -= OnCurrentStateChanged; // Sicherstellen, dass der Handler abgemeldet wird
+        Logger.LogDebug("NavMenu disposed, unsubscribed from CurrentStateService.OnChange");
+    }
+
+    // Kleine Anpassung an OnInitializedAsync für Dispose
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadProjects();
+        CurrentStateService.OnChange += OnCurrentStateChanged; // Methode statt Lambda verwenden
+    }
+
+    // Eigene Methode statt Lambda, um das Abmelden zu erleichtern
+    private async void OnCurrentStateChanged()
+    {
+        await InvokeAsync(async () =>
+        {
+            Logger.LogDebug("CurrentStateService.OnChange ausgelöst in NavMenu, lade Projekte.");
+            await LoadProjects();
+            // StateHasChanged(); // Wird in LoadProjects() aufgerufen
+        });
+    }
+
+}

@@ -1,0 +1,57 @@
+﻿
+@inject LightEditor2.Core.Services.NotificationService NotificationService
+@inject LightEditor2.Core.Services.AppInfoService AppInfoService
+@implements IDisposable
+
+@* Components/Shared/NotificationDisplay.razor *@
+@* Zeige die Statusleiste nur an, wenn IsVisible true ist *@
+@if (_isVisible)
+{
+    @* Flexbox Container hinzufügen *@
+    <div class="status-notification d-flex justify-content-between align-items-center">
+        @* Linke Seite: Statusmeldung *@
+        <span>@_message</span>
+
+        @* Rechte Seite: Versionsnummer *@
+        <span class="app-version">v@(AppInfoService.DisplayVersion)</span> @* <-- Hinzufügen *@
+    </div>
+}
+
+@code {
+    private bool _isVisible;
+    private string? _message;
+
+    protected override void OnInitialized()
+    {
+        // Abonnieren der Events des Services
+        NotificationService.OnShow += ShowNotification;
+        NotificationService.OnHide += HideNotification;
+    }
+
+    private void ShowNotification()
+    {
+        // Aktualisiere den Zustand der Komponente mit den Daten aus dem Service
+        _message = NotificationService.CurrentMessage;
+        _isVisible = NotificationService.IsVisible;
+
+        // UI-Thread sicherstellen und Komponente neu rendern lassen
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void HideNotification()
+    {
+        // Aktualisiere den Zustand (ausblenden)
+        _isVisible = false;
+        _message = null;
+
+        // UI-Thread sicherstellen und Komponente neu rendern lassen
+        InvokeAsync(StateHasChanged);
+    }
+
+    // Wichtig: Events abmelden, um Speicherlecks zu vermeiden!
+    public void Dispose()
+    {
+        NotificationService.OnShow -= ShowNotification;
+        NotificationService.OnHide -= HideNotification;
+    }
+}
