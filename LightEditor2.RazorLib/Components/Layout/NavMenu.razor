@@ -1,11 +1,21 @@
-﻿@using Microsoft.Extensions.Logging
+﻿
 @inject LightEditor2.Core.Services.IProjectService ProjectService
 @inject LightEditor2.Core.Services.ISubGroupService SubGroupService
+@inject LightEditor2.Core.Services.ISettingService SettingService
 @inject LightEditor2.Core.Services.CurrentStateService CurrentStateService
+@inject LightEditor2.Core.Services.NotificationService NotificationService
 @inject LightEditor2.Core.Abstractions.IDialogService DialogService
+@inject LightEditor2.Core.Abstractions.IFolderPickerService FolderPickerService
 @inject NavigationManager Navigation
 @inject ILogger<NavMenu> Logger
-@inject LightEditor2.Core.Services.NotificationService NotificationService
+@using LightEditor2.Core.Data
+@using LightEditor2.Core.Abstractions
+
+@using System.IO
+@using System.Text.Json
+@using System.Text.Json.Serialization
+@using Microsoft.Extensions.Logging
+
 
 
 
@@ -311,60 +321,150 @@
         }
     }
 
-    // Methode zum Exportieren eines Projekts als JSON
     private async Task ExportProjectAsync(LightEditor2.Core.Models.Project project)
     {
-        // Optional: Wenn Ihre Navigationseigenschaften nicht geladen sind, können Sie sie hier nachladen.
-        // Dies ist nur nötig, wenn Sie sie nicht bereits in der Abfrage einbeziehen.
-        // project = await _dbContext.Projects
-        //     .Include(p => p.SubGroups)
-        //         .ThenInclude(s => s.Slides)
-        //     .FirstOrDefaultAsync(p => p.Id == project.Id);
-
-        // Erstellen eines anonymen Objekts (DTO), das die relevanten Daten enthält.
-        var exportData = new
+        if (project == null)
         {
-            project.Id,
-            project.Name,
-            SubGroups = project.SubGroups?.Select(s => new
-            {
-                s.Id,
-                s.Name,
-                Slides = s.Slides?.Select(sl => new
-                {
-                    sl.Id,
-                    sl.Title,
-                    sl.Content,
-                    sl.Prompt
-                })
-            })
-        };
-
-        // Serialisieren Sie das Objekt in JSON
-        var json = System.Text.Json.JsonSerializer.Serialize(exportData, new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
-
-        // Ermitteln des Zeitstempels im Format yyyy-MM-dd_HHmmss
-        var now = DateTime.Now;
-        string timestamp = now.ToString("yyyy-MM-dd_HHmmss");
-
-        // Erstellen des Dateinamens: projektname_yyyy-MM-dd_HHmmss.json
-        string safeName = project.Name.Replace(" ", "_");
-        string fileName = $"{safeName}_{timestamp}.json";
-
-        // Fester Exportpfad (z. B. C:\Exports)
-        string exportFolder = @"C:\Users\Cina\Documents\Firma\Projekte\Projekt Doodle\LightEditor_Exports";
-        if (!Directory.Exists(exportFolder))
-        {
-            Directory.CreateDirectory(exportFolder);
+            NotificationService.ShowMessage("Fehler: Kein Projekt zum Exportieren ausgewählt.");
+            return;
         }
-        string filePath = Path.Combine(exportFolder, fileName);
+        Logger.LogInformation("Export für Projekt '{ProjectName}' (ID: {ProjectId}) wird vorbereitet...", project.Name, project.Id);
 
-        // JSON in Datei schreiben
-        await File.WriteAllTextAsync(filePath, json);
+        // Ladeanzeige starten (optional, wenn Sie _isBusy verwenden)
+        // _isBusy = true; StateHasChanged();
 
-        // Rückmeldung anzeigen
-        //await DialogService.ShowAlertAsync("Export", $"Projekt '{project.Name}' wurde exportiert nach:\n{filePath}", "OK");
-        NotificationService.ShowMessage($"Status: Projekt '{project.Name}' wurde exportiert nach:\n{filePath}");
+        string? exportFolder = null;
+        bool pathSelectedManually = false; // Flag, ob Pfad gerade ausgewählt wurde
+
+        try
+        {
+            // 1. Gespeicherten Pfad abrufen
+            exportFolder = await SettingService.GetSettingAsync(SettingKeys.ExportPath);
+            Logger.LogDebug("Gespeicherter Exportpfad: {Path}", exportFolder ?? "Nicht gesetzt");
+
+            // 2. Wenn kein Pfad gespeichert ist, den Benutzer fragen (Logik für Punkt 4)
+            if (string.IsNullOrWhiteSpace(exportFolder))
+            {
+                Logger.LogInformation("Kein Exportpfad gesetzt, Benutzer wird zur Auswahl aufgefordert.");
+                // --- Verwende Abstraktion für FolderPicker ---
+                AppFolderPickerResult folderResult = await FolderPickerService.PickFolderAsync(default); // CancellationToken.None
+
+                if (folderResult.IsSuccessful && folderResult.Path != null)
+                {
+                    exportFolder = folderResult.Path;
+                    pathSelectedManually = true; // Merken, dass Pfad gerade gewählt wurde
+                    Logger.LogInformation("Benutzer hat Exportpfad ausgewählt: {Path}", exportFolder);
+
+                    // Gewählten Pfad auch gleich speichern für die Zukunft
+                    bool saveSuccess = await SettingService.SetSettingAsync(SettingKeys.ExportPath, exportFolder);
+                    if (!saveSuccess)
+                    {
+                        // Optional: Fehlermeldung, wenn das Speichern des Pfades fehlschlägt
+                        Logger.LogWarning("Der neu ausgewählte Exportpfad konnte nicht gespeichert werden.");
+                        // Der Export wird trotzdem versucht, da der Pfad ja gewählt wurde.
+                    }
+                }
+                else
+                {
+                    // Benutzer hat abgebrochen oder Fehler
+                    NotificationService.ShowMessage($"Export abgebrochen: Kein Ordner ausgewählt. ({folderResult.Exception?.Message})");
+                    Logger.LogWarning("Ordnerauswahl für Export fehlgeschlagen oder abgebrochen. Fehler: {Exception}", folderResult.Exception);
+                    return; // Export abbrechen
+                }
+            }
+
+            // --- Sicherstellen, dass benötigte Daten geladen sind (WICHTIG!) ---
+            // Wenn LoadProjects() im NavMenu NICHT mehr SubGroups/Slides per Include lädt,
+            // müssen Sie das spezifische Projekt hier nachladen!
+            // Beispiel (nur ausführen, wenn nötig):
+            if (project.SubGroups == null || !project.SubGroups.Any() || project.SubGroups.Any(sg => sg.Slides == null))
+            {
+                Logger.LogInformation("Lade Projektdetails für Export nach...");
+                var loadedProject = await ProjectService.GetProjectByIdAsync(project.Id); // Annahme: GetProjectById lädt jetzt auch Slides oder wir passen es an.
+                if (loadedProject != null)
+                {
+                    project = loadedProject; // Ersetze das übergebene Projekt durch das frisch geladene mit Details
+                }
+                else
+                {
+                    NotificationService.ShowMessage($"Fehler: Projektdetails (ID: {project.Id}) konnten nicht geladen werden.");
+                    return; // Export abbrechen
+                }
+            }
+            // --------------------------------------------------------------------
+
+            // 3. JSON Daten vorbereiten
+            var exportData = new
+            {
+                project.Id,
+                project.Name,
+                SubGroups = project.SubGroups?.Select(s => new
+                {
+                    s.Id,
+                    s.Name,
+                    Slides = s.Slides?.Select(sl => new
+                    {
+                        sl.Id,
+                        sl.Title,
+                        sl.Content,
+                        sl.Prompt
+                        // Keine Referenz auf SubGroup hier, passt zu WithOne()
+                    }) ?? Enumerable.Empty<object>() // Sicherstellen, dass Slides nie null ist
+                }) ?? Enumerable.Empty<object>() // Sicherstellen, dass SubGroups nie null ist
+            };
+            var jsonOptions = new JsonSerializerOptions
+                {
+                    WriteIndented = true,
+                // ReferenceHandler.Preserve ist hier für den Einzelexport nicht nötig (und pot. verwirrend)
+                // ReferenceHandler = ReferenceHandler.Preserve
+                };
+            var json = JsonSerializer.Serialize(exportData, jsonOptions);
+
+
+            // 4. Dateinamen generieren
+            var now = DateTime.Now;
+            string timestamp = now.ToString("yyyy-MM-dd_HHmmss");
+            // Sichereren Weg zur Dateinamenbereinigung verwenden
+            string safeName = string.Join("_", project.Name.Split(Path.GetInvalidFileNameChars()));
+            if (string.IsNullOrWhiteSpace(safeName)) safeName = "Export"; // Fallback
+            string fileName = $"{safeName}_{timestamp}.json";
+
+
+            // 5. Vollständigen Pfad erstellen
+            string filePath = Path.Combine(exportFolder, fileName);
+            Logger.LogInformation("Exportiere nach: {FilePath}", filePath);
+
+
+            // 6. JSON in Datei schreiben
+            await File.WriteAllTextAsync(filePath, json);
+
+            // 7. Rückmeldung anzeigen
+            if (pathSelectedManually)
+            {
+                NotificationService.ShowMessage($"Status: Pfad gesetzt und Projekt '{project.Name}' exportiert nach '{filePath}'.");
+            }
+            else
+            {
+                NotificationService.ShowMessage($"Status: Projekt '{project.Name}' exportiert nach '{filePath}'.");
+            }
+            Logger.LogInformation("Projekt '{ProjectName}' erfolgreich exportiert.", project.Name);
+
+        }
+        catch (UnauthorizedAccessException uaEx)
+        {
+            Logger.LogError(uaEx, "Fehler beim Export: Keine Berechtigung zum Schreiben in Ordner '{ExportFolder}'.", exportFolder);
+            await DialogService.ShowAlertAsync("Fehler", $"Keine Berechtigung zum Schreiben in den Ordner:\n{exportFolder}\n\nWählen Sie ggf. einen anderen Ordner.", "OK");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Unerwarteter Fehler beim Exportieren von Projekt '{ProjectName}'.", project.Name);
+            await DialogService.ShowAlertAsync("Fehler", "Ein unerwarteter Fehler ist beim Exportieren aufgetreten.", "OK");
+        }
+        finally
+        {
+            // Ladeanzeige beenden (optional)
+            // _isBusy = false; StateHasChanged();
+        }
     }
 
     // WICHTIG: Event-Handler abmelden! (Behandelt Kritischen Punkt 2 teilweise)
