@@ -57,19 +57,35 @@ namespace LightEditor2.Core.Services
 
         public async Task<bool> ImportAllDataAsync(string jsonData)
         {
-            List<Project> importedProjects;
+            FullExportData? importedData; // Korrekter Typ für das deserialisierte Objekt
             try
             {
-                // JSON Deserialisieren
+                // JSON Deserialisieren in das FullExportData DTO
                 var options = new JsonSerializerOptions
                 {
-                    // Wichtig, falls Sie komplexe Beziehungen hätten, die Zyklen verursachen könnten
-                    // Für das aktuelle Modell wahrscheinlich nicht nötig, schadet aber nicht.
-                    ReferenceHandler = ReferenceHandler.Preserve,
-                    PropertyNameCaseInsensitive = true // Flexibler beim Einlesen
+                    ReferenceHandler = ReferenceHandler.Preserve, // Konsistent mit Export halten
+                    PropertyNameCaseInsensitive = true
                 };
-                importedProjects = JsonSerializer.Deserialize<List<Project>>(jsonData, options) ?? new List<Project>();
-                _logger.LogInformation("JSON-Daten erfolgreich deserialisiert. {ProjectCount} Projekte gefunden.", importedProjects.Count);
+                // --- KORREKTER TYP HIER ---
+                importedData = JsonSerializer.Deserialize<FullExportData>(jsonData, options);
+
+                // Prüfen, ob Deserialisierung erfolgreich war und Daten enthält
+                if (importedData == null)
+                {
+                    _logger.LogError("Fehler beim Deserialisieren der JSON-Daten: Ergebnis ist null.");
+                    return false;
+                }
+                // --- Log anpassen, um alle Daten zu erwähnen ---
+                _logger.LogInformation("JSON-Daten erfolgreich deserialisiert. FormatVersion: {FormatVersion}, Projekte: {ProjectCount}, Settings: {SettingsCount}",
+                    importedData.FormatVersion, importedData.Projects?.Count ?? 0, importedData.Settings?.Count ?? 0);
+
+                // Optional: FormatVersion prüfen
+                if (importedData.FormatVersion != 1)
+                {
+                    _logger.LogWarning("Importierte Daten haben eine unerwartete FormatVersion: {FormatVersion}", importedData.FormatVersion);
+                    // Entscheiden, ob Import abgebrochen werden soll
+                    // return false;
+                }
             }
             catch (JsonException jsonEx)
             {
@@ -82,48 +98,53 @@ namespace LightEditor2.Core.Services
                 return false;
             }
 
+            // Sicherstellen, dass Listen nicht null sind (falls JSON leer war)
+            var projectsToImport = importedData.Projects ?? new List<Project>();
+            var settingsToImport = importedData.Settings ?? new List<Setting>();
 
             await using var dbContext = await _dbContextFactory.CreateDbContextAsync();
-            // --- WICHTIG: Transaktion verwenden, um sicherzustellen, dass alles oder nichts passiert ---
             await using var transaction = await dbContext.Database.BeginTransactionAsync();
             try
             {
-                _logger.LogWarning("Beginne Import: LÖSCHE ALLE VORHANDENEN DATEN!");
+                _logger.LogWarning("Beginne Import: LÖSCHE ALLE VORHANDENEN PROJEKTE, UNTERGRUPPEN, SLIDES UND EINSTELLUNGEN!");
 
-                // 1. Alle vorhandenen Daten löschen (Reihenfolge wichtig wegen Constraints, obwohl Cascade helfen sollte)
-                // Alternative zu ExecuteDeleteAsync (EF Core 7+): RemoveRange + SaveChanges
-                // dbContext.Slides.RemoveRange(dbContext.Slides);
-                // dbContext.SubGroups.RemoveRange(dbContext.SubGroups);
-                // dbContext.Projects.RemoveRange(dbContext.Projects);
-                // await dbContext.SaveChangesAsync(); // Einmal speichern nach dem Löschen
-
-                // Oder mit ExecuteDeleteAsync (einfacher für komplettes Löschen)
+                // 1. Alle vorhandenen Daten löschen (inkl. Settings)
+                int deletedSettings = await dbContext.Settings.ExecuteDeleteAsync(); // <-- Settings löschen
                 int deletedSlides = await dbContext.Slides.ExecuteDeleteAsync();
                 int deletedSubGroups = await dbContext.SubGroups.ExecuteDeleteAsync();
                 int deletedProjects = await dbContext.Projects.ExecuteDeleteAsync();
-                _logger.LogInformation("Daten gelöscht: {Projects} Projekte, {SubGroups} Untergruppen, {Slides} Slides.", deletedProjects, deletedSubGroups, deletedSlides);
+                _logger.LogInformation("Daten gelöscht: {Projects} Projekte, {SubGroups} Untergruppen, {Slides} Slides, {Settings} Einstellungen.",
+                    deletedProjects, deletedSubGroups, deletedSlides, deletedSettings);
 
 
-                // 2. Neue Daten hinzufügen
-                // Wichtig: Sicherstellen, dass die IDs nicht explizit gesetzt werden,
-                // wenn sie von der DB generiert werden sollen (AutoIncrement).
-                // EF Core sollte das bei AddRange normalerweise korrekt handhaben,
-                // indem es Entitäten als 'Added' markiert.
-                // Falls importierte Daten IDs haben, könnte es zu Konflikten kommen,
-                // wenn die DB diese IDs neu generieren will. Sicherer ist oft,
-                // die IDs vor dem AddRange zu entfernen/nullen, wenn sie nicht erhalten bleiben sollen.
-                // HIER GEHEN WIR DAVON AUS, DASS DIE IDs ÜBERSCHRIEBEN/IGNORIERT WERDEN.
-                if (importedProjects.Any())
+                // 2. Neue Daten hinzufügen (Projekte und Settings)
+                if (projectsToImport.Any())
                 {
-                    await dbContext.Projects.AddRangeAsync(importedProjects);
-                    await dbContext.SaveChangesAsync(); // Speichern der neuen Daten
-                    _logger.LogInformation("{ProjectCount} Projekte erfolgreich importiert.", importedProjects.Count);
+                    // --- Projekte aus importedData verwenden ---
+                    await dbContext.Projects.AddRangeAsync(projectsToImport);
+                    await dbContext.SaveChangesAsync(); // Projekte speichern
+                    _logger.LogInformation("{ProjectCount} Projekte erfolgreich importiert.", projectsToImport.Count);
                 }
                 else
                 {
                     _logger.LogInformation("Keine Projekte in den Importdaten gefunden.");
                 }
 
+                // --- SETTINGS IMPORTIEREN ---
+                if (settingsToImport.Any())
+                {
+                    // --- Settings aus importedData verwenden ---
+                    // Da Settings einen festen Key haben, ist AddRange hier sicher,
+                    // nachdem wir vorher alles gelöscht haben.
+                    await dbContext.Settings.AddRangeAsync(settingsToImport);
+                    await dbContext.SaveChangesAsync(); // Settings speichern
+                    _logger.LogInformation("{SettingsCount} Einstellungen erfolgreich importiert.", settingsToImport.Count);
+                }
+                else
+                {
+                    _logger.LogInformation("Keine Einstellungen in den Importdaten gefunden.");
+                }
+                // ---------------------------
 
                 // 3. Transaktion bestätigen
                 await transaction.CommitAsync();
@@ -133,7 +154,6 @@ namespace LightEditor2.Core.Services
             catch (Exception ex)
             {
                 _logger.LogError(ex, "FEHLER während des Datenbank-Importvorgangs. Transaktion wird zurückgerollt.");
-                // Bei Fehlern Transaktion zurückrollen
                 await transaction.RollbackAsync();
                 return false;
             }

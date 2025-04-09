@@ -7,7 +7,6 @@
 @inject NavigationManager Navigation
 @inject LightEditor2.Core.Abstractions.IDialogService DialogService
 @inject LightEditor2.Core.Services.CurrentStateService CurrentStateService
-@inject LightEditor2.Core.Services.ISubGroupService SubGroupService
 @implements IDisposable
 @inject ILogger<MainLayout> Logger
 
@@ -40,41 +39,6 @@
         // Sicherstellen, dass UI-Updates im richtigen Thread passieren
         InvokeAsync(StateHasChanged);
         Logger.LogDebug("CurrentStateService.OnChange ausgelöst in MainLayout, StateHasChanged aufgerufen.");
-    }
-
-    // Methode zu async Task ändern
-    private async Task OpenSettings()
-    {
-        if (CurrentStateService.CurrentSubgroupId <= 0)
-        {
-            Logger.LogWarning("OpenSettings aufgerufen, aber CurrentSubgroupId ist ungültig ({CurrentSubgroupId}).", CurrentStateService.CurrentSubgroupId);
-            await DialogService.ShowAlertAsync("Info", "Keine gültige Untergruppe ausgewählt.", "OK");
-            return;
-        }
-
-        Logger.LogDebug("OpenSettings aufgerufen für SubgroupId: {CurrentSubgroupId}.", CurrentStateService.CurrentSubgroupId);
-        // GetSubGroupByIdAsync gibt jetzt SubGroup? zurück
-        var subgroup = await SubGroupService.GetSubGroupByIdAsync(CurrentStateService.CurrentSubgroupId);
-
-        if (subgroup != null)
-        {
-            Logger.LogDebug("Subgroup '{SubgroupName}' für Einstellungen gefunden.", subgroup.Name);
-            // Zeigen Sie ein Popup an, das z. B. den Namen der Untergruppe anzeigt.
-            await DialogService.ShowAlertAsync(
-                "Einstellungen",
-                $"Aktuelle Untergruppe: {subgroup.Name} (ID: {subgroup.Id})", // Name verwenden, falls vorhanden
-                "OK"
-            );
-        }
-        else
-        {
-            Logger.LogError("Subgroup mit ID {CurrentSubgroupId} für Einstellungen nicht gefunden oder Ladefehler.", CurrentStateService.CurrentSubgroupId);
-            await DialogService.ShowAlertAsync(
-               "Fehler",
-               $"Die Untergruppe mit der ID {CurrentStateService.CurrentSubgroupId} konnte nicht geladen werden.",
-               "OK"
-           );
-        }
     }
 
     // Dispose-Methode implementieren
