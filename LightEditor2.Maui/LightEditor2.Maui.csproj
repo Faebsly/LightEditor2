@@ -23,7 +23,7 @@
 		<ApplicationTitle>LightEditor2</ApplicationTitle>
 
 		<!-- App Identifier ANPASSEN -->
-		<ApplicationId>com.IhreFirmaOderName.lighteditor2</ApplicationId>
+		<ApplicationId>com.FaebsUp.lighteditor2</ApplicationId>
 		<!-- NEUE GUID ERZEUGEN UND EINFÜGEN (WICHTIG!) -->
 		<ApplicationIdGuid>07ae2b57-6310-43b8-bac1-70f43caeede0</ApplicationIdGuid>
 
@@ -36,6 +36,15 @@
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'android'">24.0</SupportedOSPlatformVersion>
 		<SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</SupportedOSPlatformVersion>
 		<TargetPlatformMinVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'windows'">10.0.17763.0</TargetPlatformMinVersion>
+		<Configurations>Debug;Release;test</Configurations>
+		<GenerateAppInstallerFile>True</GenerateAppInstallerFile>
+		<AppxPackageSigningEnabled>False</AppxPackageSigningEnabled>
+		<AppxPackageSigningTimestampDigestAlgorithm>SHA256</AppxPackageSigningTimestampDigestAlgorithm>
+		<AppxAutoIncrementPackageRevision>True</AppxAutoIncrementPackageRevision>
+		<AppxSymbolPackageEnabled>False</AppxSymbolPackageEnabled>
+		<GenerateTestArtifacts>True</GenerateTestArtifacts>
+		<AppInstallerUri>C:\Users\Cina\Documents\Firma\Projekte\LightEditor2\.published\Installer</AppInstallerUri>
+		<HoursBetweenUpdateChecks>0</HoursBetweenUpdateChecks>
 		<!-- Tizen auskommentiert lassen oder entfernen -->
 		<!-- <SupportedOSPlatformVersion Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'tizen'">6.5</SupportedOSPlatformVersion> -->
 	</PropertyGroup>
@@ -79,6 +88,9 @@
 	<ItemGroup>
 		<ProjectReference Include="..\LightEditor2.Core\LightEditor2.Core.csproj" />
 		<ProjectReference Include="..\LightEditor2.RazorLib\LightEditor2.RazorLib.csproj" />
+	</ItemGroup>
+	<ItemGroup>
+	  <Folder Include="Properties\" />
 	</ItemGroup>
 
 	<!-- (Optional) Hinzufügen, um sicherzustellen, dass das Toolkit referenziert ist, -->
